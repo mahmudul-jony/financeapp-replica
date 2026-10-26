@@ -1,6 +1,6 @@
 name: Build Finance App APK
 
-'on':
+on:
   push:
     branches:
       - main
