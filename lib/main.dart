@@ -3,6 +3,7 @@ import 'package:financeapp/app_constants.dart';
 import 'package:financeapp/screens/signin_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:financeapp/providers/finance_provider.dart';
+import 'package:financeapp/providers/update_provider.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -10,6 +11,7 @@ void main() {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => FinanceProvider()),
+        ChangeNotifierProvider(create: (_) => UpdateProvider()),
       ],
       child: const BankingDashboardApp(),
     ),
