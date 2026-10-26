@@ -61,7 +61,10 @@ class UpdateService {
       }
 
       // ট্যাগ থেকে 'v' প্রিফিক্স সরিয়ে শুধু ভার্সন 부분 নেওয়া
-      final latestVersion = tagName.startsWith('v') ? tagName.substring(1) : tagName;
+      final versionWithoutPrefix =
+    tagName.startsWith('v') ? tagName.substring(1) : tagName;
+
+final latestVersion = versionWithoutPrefix.split('+').first;
 
       // ৩. ভার্সন তুলনা (বিল্ড নম্বর berücksicht করা হবে না)
       final isUpdateAvailable = _isVersionNewer(latestVersion, currentVersion);
