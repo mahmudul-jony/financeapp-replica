@@ -1,12 +1,12 @@
 /// APK ডাউনলোড এবং Android প্যাকেজ ইনস্টলার দিয়ে আপডেট করার সার্ভিস।
 ///
 /// গিঠব রিলিজ থেকে APK অ্যাসেট ডাউনলোড করে অ্যাপের ডকুমেন্টস ডিরেক্টরিতে সংরক্ষণ করে,
-/// তারপরে সিস্টেমের প্যাকেজ ইনস্টলার দিয়ে ইনস্টল করাস্থাপন করে।
+/// তারপরে সিস্টেমের প্যাকেজ ইনস্টলার দিয়ে ইনস্টল করার জন্য উ proclamery করার জন্য তৈরি।
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
-import 'package:open_file_plus/open_file_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class ApkUpdateService {
   /// APK ফাইল ডাউনলোড করে অ্যাপের ডকুমেন্টস ডিরেক্টরিতে সংরক্ষণ করে।
@@ -32,10 +32,17 @@ class ApkUpdateService {
     }
   }
 
-  /// ডাউনলোড করা APK ফাইলটি Android প্যাকেজ ইনস্টলার দিয়ে খোলা করে।
+  /// ডাউনলোড করা APK ফাইলটি Android প্যাকেজ ইনস্টলার দিয়েOpened কনফার্ম করার প্রক্রিয়া শুরু করে।
   ///
-  /// ইউজারকে ইনস্টলেশনের জন্য কনফার্ম করতে হবে (সাইলেন্ট ইনস্টল নয়)।
+  /// `url_launcher` 6.x API-তে `canLaunchUrl`/`launchUrl` ব্যবহার করতে হয়,
+  /// যাতে deprecated warning এড়িয়ে যাওয়া যায় এবং সেরা কম্প্যাটিবিলিটি বজায় রাখা হয়。
   Future<void> installApk(File apkFile) async {
-    await OpenFile.open(apkFile.path);
+    final Uri fileUri = Uri.file(apkFile.path);
+
+    if (await canLaunchUrl(fileUri)) {
+      await launchUrl(fileUri);
+    } else {
+      throw Exception('APK ফাইল খোলার জন্য URLs লঞ্চ করা সম্ভব নেই');
+    }
   }
 }
