@@ -1,4 +1,4 @@
-
+```yaml
 name: Build Finance App APK
 
 on:
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -54,9 +54,26 @@ jobs:
       - name: Build signed release APK
         run: flutter build apk --release
 
-      - name: Upload APK
+      - name: Publish APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          TAG="v${VERSION}"
+
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" \
+              --title "Finance App $TAG" \
+              --notes "Finance App release $TAG"
+
+          gh release upload "$TAG" \
+            build/app/outputs/flutter-apk/app-release.apk#financeapp.apk \
+            --clobber
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: financeapp-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 14
+```
