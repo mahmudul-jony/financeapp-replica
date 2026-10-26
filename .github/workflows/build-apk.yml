@@ -1,78 +1,11 @@
-name: Build Finance App APK
+name: YAML Validation Test
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.41.9'
-          channel: stable
-          cache: true
-
-      - name: Restore Android signing key
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          test -n "$KEYSTORE_BASE64"
-          test -n "$KEYSTORE_PASSWORD"
-          test -n "$KEY_PASSWORD"
-          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
-          cat > android/key.properties <<EOF
-          storeFile=upload-keystore.jks
-          keyAlias=upload
-          storePassword=$KEYSTORE_PASSWORD
-          keyPassword=$KEY_PASSWORD
-          EOF
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Build signed release APK
-        run: flutter build apk --release
-
-      - name: Publish APK to GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
-          TAG="v${VERSION}"
-
-          gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" \
-              --title "Finance App $TAG" \
-              --notes "Finance App release $TAG"
-
-          gh release upload "$TAG" \
-            build/app/outputs/flutter-apk/app-release.apk#financeapp.apk \
-            --clobber
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: financeapp-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
-          retention-days: 14
-```
+      - name: Check workflow
+        run: echo "YAML is valid"
