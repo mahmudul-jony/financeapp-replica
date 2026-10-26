@@ -116,7 +116,7 @@ class UpdateNotificationWidget extends StatelessWidget {
               ),
             ),
           ],
-          AppSpacing.elementGap,
+          AppSpacing.largeVerticalGap,
           if (isDownloading) ...[
             LinearProgressIndicator(
               value: progress > 0 ? progress : null,

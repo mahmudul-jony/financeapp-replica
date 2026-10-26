@@ -51,8 +51,26 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Determine Version and Build Number
+        id: version_info
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | tr -d '\r')
+          VERSION_NAME=$(echo "$RAW_VERSION" | cut -d'+' -f1)
+          BUILD_NUMBER="${{ github.run_number }}"
+          FULL_VERSION="${VERSION_NAME}+${BUILD_NUMBER}"
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "full_version=$FULL_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v${FULL_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building version $FULL_VERSION (tag: v${FULL_VERSION})"
+
       - name: Build signed release APK
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release \
+            --build-name="${{ steps.version_info.outputs.version_name }}" \
+            --build-number="${{ steps.version_info.outputs.build_number }}"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -68,8 +86,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | tr -d '\r')
-          TAG="v${VERSION}"
+          TAG="${{ steps.version_info.outputs.tag }}"
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists."
