@@ -11,6 +11,7 @@ import 'package:provider/provider.dart';
 import 'package:financeapp/providers/finance_provider.dart';
 import 'package:financeapp/models/transaction_model.dart';
 import 'package:financeapp/widgets/transaction_item.dart';
+import 'package:financeapp/widgets/update_checker.dart';
 
 class BankingDashboardScreen extends StatelessWidget {
   const BankingDashboardScreen({super.key});
@@ -68,6 +69,7 @@ class BankingDashboardScreen extends StatelessWidget {
                         children: [
                           const DashboardHeader(),
                           const SizedBox(height: 24),
+                          const UpdateChecker(),
                           SummaryCard(
                             totalWithdrawable: totalWithdrawable,
                             totalExpense: totalExpense,

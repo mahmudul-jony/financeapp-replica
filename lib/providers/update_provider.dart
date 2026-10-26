@@ -1,8 +1,3 @@
-// আপডেট চেকের স্টেট ম্যানেজমেন্ট প্রোভাইডার।
-//
-// FinanceProvider- এর প্যাটার্ন অনুসরণ করে তৈরি। বিল্ড মেথদের মধ্যে
-// context.watch<UpdateProvider>() এবং বাটন ক্লিক/ফাংশন কলের জন্য
-// context.read<UpdateProvider>() ব্যবহার করা উচিত।
 import 'package:flutter/material.dart';
 
 import '../services/update_service.dart';
@@ -14,9 +9,11 @@ class UpdateProvider extends ChangeNotifier {
   final ApkUpdateService _apkUpdateService = ApkUpdateService();
 
   UpdateInfo _updateInfo = UpdateInfo.initial();
+  DateTime? _lastCheckTime;
 
   bool _isDownloading = false;
   double _downloadProgress = 0.0;
+  String? _downloadError;
 
   UpdateInfo get updateInfo => _updateInfo;
 
@@ -27,28 +24,59 @@ class UpdateProvider extends ChangeNotifier {
 
   bool get isDownloading => _isDownloading;
   double get downloadProgress => _downloadProgress;
+  String? get downloadError => _downloadError;
 
-  /// গিঠব থেকে লেটেস্ট রিলিজ চেক করে আপডেট তথ্য আপডেট করে।
-  Future<void> checkForUpdates() async {
-    _updateInfo = UpdateInfo.loading();
-    notifyListeners();
+  /// Checks for newer releases from GitHub.
+  /// Set [silent] to true when checking in background/lifecycle resume to prevent UI flicker.
+  Future<void> checkForUpdates({bool silent = false, bool force = false}) async {
+    // Never interrupt an active APK download
+    if (_isDownloading) return;
 
-    _updateInfo = await _updateService.checkForUpdates();
-    notifyListeners();
+    final now = DateTime.now();
+    if (!force && _lastCheckTime != null && now.difference(_lastCheckTime!).inSeconds < 15) {
+      return; // Throttled to prevent rapid duplicate calls
+    }
+    _lastCheckTime = now;
+
+    if (!silent && _updateInfo.status == UpdateStatus.initial) {
+      _updateInfo = UpdateInfo.loading();
+      notifyListeners();
+    }
+
+    try {
+      final result = await _updateService.checkForUpdates();
+      _updateInfo = result;
+      _downloadError = null;
+    } catch (e) {
+      if (!silent) {
+        _updateInfo = UpdateInfo.error(_updateInfo.currentVersion, e.toString());
+      }
+    } finally {
+      notifyListeners();
+    }
   }
 
-  /// লেটেস্ট রিলিজ থেকে APK ডাউনলোড করে এবং Android প্যাকেজ ইনস্টলার দিয়ে ইনস্টল করার প্রক্রিয়া শুরু করে।
+  /// Downloads the release APK with live progress tracking and triggers Android's package installer.
   Future<void> downloadAndInstallUpdate() async {
     final info = _updateInfo;
-    if (!info.isUpdateAvailable || info.apkDownloadUrl == null) return;
+    if (!info.isUpdateAvailable || info.apkDownloadUrl == null || _isDownloading) return;
 
     _isDownloading = true;
     _downloadProgress = 0.0;
+    _downloadError = null;
     notifyListeners();
 
     try {
-      final apkFile = await _apkUpdateService.downloadApk(info.apkDownloadUrl!);
+      final apkFile = await _apkUpdateService.downloadApk(
+        info.apkDownloadUrl!,
+        onProgress: (progress) {
+          _downloadProgress = progress;
+          notifyListeners();
+        },
+      );
+
       if (apkFile == null) {
+        _downloadError = 'ডাউনলোড সম্পন্ন হতে পারেনি। অনুগ্রহ করে ইন্টারনেট সংযোগ চেক করুন।';
         _isDownloading = false;
         _downloadProgress = 0.0;
         notifyListeners();
@@ -60,7 +88,7 @@ class UpdateProvider extends ChangeNotifier {
 
       await _apkUpdateService.installApk(apkFile);
     } catch (e) {
-      // ডাউনলোড বা ইনস্টলেশন এরর হলে শুধু স্টেট রিসেট করা হয়, UI-তে এরর দেখানোর জন্য UpdateInfo পরিবর্তন করা হয় না
+      _downloadError = 'ইনস্টলার শুরু করা সম্ভব হয়নি: $e';
     } finally {
       _isDownloading = false;
       _downloadProgress = 0.0;

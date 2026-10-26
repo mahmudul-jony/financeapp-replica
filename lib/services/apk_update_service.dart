@@ -1,48 +1,101 @@
-/// APK ডাউনলোড এবং Android প্যাকেজ ইনস্টলার দিয়ে আপডেট করার সার্ভিস।
-///
-/// গিঠব রিলিজ থেকে APK অ্যাসেট ডাউনলোড করে অ্যাপের ডকুমেন্টস ডিরেক্টরিতে সংরক্ষণ করে,
-/// তারপরে সিস্টেমের প্যাকেজ ইনস্টলার দিয়ে ইনস্টল করার জন্য উ proclamery করার জন্য তৈরি।
+import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 class ApkUpdateService {
-  /// APK ফাইল ডাউনলোড করে অ্যাপের ডকুমেন্টস ডিরেক্টরিতে সংরক্ষণ করে।
-  ///
-  /// সফল হলে ডাউনলোড করা ফাইলের `File` অবজেক্ট রিটার্ন করে, অন্যথায় `null`।
-  Future<File?> downloadApk(String downloadUrl) async {
+  static const MethodChannel _channel =
+      MethodChannel('com.example.financeapp/app_updater');
+
+  /// Downloads APK file to app cache directory with streaming progress support.
+  Future<File?> downloadApk(
+    String downloadUrl, {
+    void Function(double progress)? onProgress,
+  }) async {
+    final client = http.Client();
+    IOSink? sink;
+
     try {
-      final dir = await getApplicationDocumentsDirectory();
-      final apkFile = File('${dir.path}/financeapp_update.apk');
+      final tempDir = await getTemporaryDirectory();
+      final apkFile = File('${tempDir.path}/financeapp_update.apk');
 
-      final response = await http.get(Uri.parse(downloadUrl)).timeout(
-        const Duration(seconds: 30),
-      );
-
-      if (response.statusCode == 200) {
-        await apkFile.writeAsBytes(response.bodyBytes);
-        return apkFile;
+      // Delete any previous partial or old download
+      if (await apkFile.exists()) {
+        try {
+          await apkFile.delete();
+        } catch (_) {}
       }
 
-      return null;
+      final request = http.Request('GET', Uri.parse(downloadUrl));
+      request.headers['User-Agent'] = 'FinanceApp';
+
+      final response = await client.send(request).timeout(
+            const Duration(seconds: 30),
+          );
+
+      if (response.statusCode != 200) {
+        return null;
+      }
+
+      final totalBytes = response.contentLength ?? 0;
+      int receivedBytes = 0;
+
+      sink = apkFile.openWrite();
+
+      await for (final chunk in response.stream) {
+        sink.add(chunk);
+        receivedBytes += chunk.length;
+
+        if (totalBytes > 0 && onProgress != null) {
+          final progress = (receivedBytes / totalBytes).clamp(0.0, 1.0);
+          onProgress(progress);
+        }
+      }
+
+      await sink.flush();
+      await sink.close();
+      sink = null;
+
+      if (totalBytes > 0 && receivedBytes < totalBytes) {
+        // Download was interrupted or incomplete
+        try {
+          await apkFile.delete();
+        } catch (_) {}
+        return null;
+      }
+
+      return apkFile;
     } catch (e) {
       return null;
+    } finally {
+      if (sink != null) {
+        try {
+          await sink.close();
+        } catch (_) {}
+      }
+      client.close();
     }
   }
 
-  /// ডাউনলোড করা APK ফাইলটি Android প্যাকেজ ইনস্টলার দিয়েOpened কনফার্ম করার প্রক্রিয়া শুরু করে।
-  ///
-  /// `url_launcher` 6.x API-তে `canLaunchUrl`/`launchUrl` ব্যবহার করতে হয়,
-  /// যাতে deprecated warning এড়িয়ে যাওয়া যায় এবং সেরা কম্প্যাটিবিলিটি বজায় রাখা হয়。
+  /// Triggers Android Package Installer confirmation flow using FileProvider
   Future<void> installApk(File apkFile) async {
-    final Uri fileUri = Uri.file(apkFile.path);
+    if (!await apkFile.exists()) {
+      throw Exception('APK file not found at: ${apkFile.path}');
+    }
 
-    if (await canLaunchUrl(fileUri)) {
-      await launchUrl(fileUri);
-    } else {
-      throw Exception('APK ফাইল খোলার জন্য URLs লঞ্চ করা সম্ভব নেই');
+    try {
+      final result = await _channel.invokeMethod<bool>(
+        'installApk',
+        {'filePath': apkFile.path},
+      );
+
+      if (result != true) {
+        throw Exception('Failed to start package installer');
+      }
+    } on PlatformException catch (e) {
+      throw Exception('Installation error: ${e.message}');
     }
   }
 }

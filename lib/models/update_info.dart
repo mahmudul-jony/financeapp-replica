@@ -1,23 +1,21 @@
-/// আপডেট情報ের মডেল ক্লাস।
-///
-/// GitHub Release API থেকে প্রাপ্ত তথ্য এবং ইনস্টল করা App-এর ভার্সন کےその בבסিসে
-/// আপডেটের availability নিরূপণ করে। APK ডাউনলোড বা ইনস্টলেশন এখনই ইমপ্লিমেন্ট করা হয়নি।
+/// Model representing update check status and metadata.
 enum UpdateStatus {
-  initial,   // এখনও চেক করা হয়নি
-  loading,   // চেক চলছে
-  success,   // সফলভাবে চেক completed (আপডেট আছে বা নেই)
-  noUpdate,  // আপডেট পাওয়া যায়নি (বর্তমান ভার্সনই লেটেস্ট)
-  error,     // নেটওয়ার্ক বা রেসপন্স এরর
+  initial,   // Check hasn't run yet
+  loading,   // Checking in progress
+  success,   // Check completed successfully
+  noUpdate,  // Current version is up to date
+  error,     // Network or response error
 }
 
 class UpdateInfo {
-  final bool isUpdateAvailable; // নতুন ভার্সন আছে কিনা
-  final String latestVersion;   // গিঠব লেটেস্ট রিলিজ ট্যাগ ভার্সন (v prefix ছাড়া)
-  final String currentVersion;  // ইনস্টল করা App-এর ভার্সন (build number ছাড়া)
-  final String releaseUrl;      // GitHub রিলিজ পেজ URL (html_url)
-  final String? apkDownloadUrl; // APK অ্যাসেটের ডাউনলোড URL (যদি থাকে)
-  final UpdateStatus status;    // বর্তমান স্ট্যাটাস
-  final String? errorMessage;   // এরর মেসেজ (status == error হলে)
+  final bool isUpdateAvailable;
+  final String latestVersion;   // Latest GitHub release tag/version
+  final String currentVersion;  // Currently installed version (e.g. "1.0.1+3")
+  final String releaseUrl;      // GitHub release webpage URL
+  final String? apkDownloadUrl; // Direct APK download URL
+  final UpdateStatus status;
+  final String? errorMessage;
+  final String? releaseNotes;
 
   const UpdateInfo({
     required this.isUpdateAvailable,
@@ -27,6 +25,7 @@ class UpdateInfo {
     this.apkDownloadUrl,
     required this.status,
     this.errorMessage,
+    this.releaseNotes,
   });
 
   factory UpdateInfo.initial() => const UpdateInfo(

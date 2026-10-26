@@ -1,8 +1,3 @@
-/// অ্যাপ শুরুতে আপডেট চেক করে নোটিফিকেশন উইজেট দেখানোর জন্য স্টেটফুল উইজেট।
-///
-/// `initState`-এ `UpdateProvider.checkForUpdates()` কল করে এবং
-/// `UpdateNotificationWidget` রেন্ডার করে। এটি যেকোনো স্ক্রিনের চিলড্রেনে যোগ করা যায়
-/// বিদ্যমান UI অপ্রয়োজনে পরিবর্তন না করে।
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -16,17 +11,30 @@ class UpdateChecker extends StatefulWidget {
   State<UpdateChecker> createState() => _UpdateCheckerState();
 }
 
-class _UpdateCheckerState extends State<UpdateChecker> {
+class _UpdateCheckerState extends State<UpdateChecker> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    // flutter ফ্রেমের প্রথম রেন্ডারের পর আপডেট চেক শুরু করা হয়,
-    // যাতে বিল্ড প্রসessin মাঝে অ্যাসিনক কলের সমস্যা না হয়।
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         context.read<UpdateProvider>().checkForUpdates();
       }
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      // Check for updates when app returns to the foreground
+      context.read<UpdateProvider>().checkForUpdates(silent: true);
+    }
   }
 
   @override

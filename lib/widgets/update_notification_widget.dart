@@ -1,17 +1,10 @@
-/// নতুন ভার্সন উপলব্ধ হলে UI-তে দেখানোর জন্য উইজেট।
-///
-/// বিদ্যমান স্ক্রিন বা ফাংশনালিটিতে অপ্রয়োজনীয় পরিবর্তন না করে এইウィজেটটি
-/// যেকোনো স্ক্রিনে যোগ করা যায়। `UpdateProvider`-এর মাধ্যমে `context.watch`
-/// ব্যবহার করে স্টেট derive করা হয়।
-///
-/// PROJECT_RULES অনুযায়ী: কালার বা টেক্সট স্টাইল হার্ডকোড করা হয়নি,
-/// `AppColors`, `AppTypography`, `AppSpacing` ব্যবহার করা হয়েছে।
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'package:financeapp/app_constants.dart';
 import 'package:financeapp/models/update_info.dart';
 import 'package:financeapp/providers/update_provider.dart';
-import 'package:provider/provider.dart';
 
 class UpdateNotificationWidget extends StatelessWidget {
   const UpdateNotificationWidget({super.key});
@@ -21,68 +14,25 @@ class UpdateNotificationWidget extends StatelessWidget {
     final updateProvider = context.watch<UpdateProvider>();
     final info = updateProvider.updateInfo;
 
-    switch (info.status) {
-      case UpdateStatus.loading:
-        return _buildLoading();
-      case UpdateStatus.error:
-        return _buildError(context, info.errorMessage ?? 'আপডেট জানা যায়নি');
-      case UpdateStatus.initial:
-      case UpdateStatus.noUpdate:
-        return const SizedBox.shrink();
-      case UpdateStatus.success:
-        if (!info.isUpdateAvailable) return const SizedBox.shrink();
-        return _buildUpdateAvailable(context, info, updateProvider);
+    // Silent on initial, loading, or when no update is found
+    if (info.status == UpdateStatus.initial ||
+        info.status == UpdateStatus.loading ||
+        info.status == UpdateStatus.noUpdate) {
+      return const SizedBox.shrink();
     }
+
+    if (info.status == UpdateStatus.error) {
+      // Keep errors non-intrusive or hidden unless explicitly needed
+      return const SizedBox.shrink();
+    }
+
+    if (info.status == UpdateStatus.success && info.isUpdateAvailable) {
+      return _buildUpdateAvailable(context, info, updateProvider);
+    }
+
+    return const SizedBox.shrink();
   }
 
-  /// লোডিং স্ট্যাটের জন্য ছোট ইন্ডিকেটর
-  Widget _buildLoading() {
-    return const SizedBox(
-      height: 24,
-      child: Center(
-        child: SizedBox(
-          width: 16,
-          height: 16,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-      ),
-    );
-  }
-
-  /// এরর স্ট্যাটের জন্য মেসেজ
-  Widget _buildError(BuildContext context, String message) {
-    return Container(
-      margin: AppSpacing.screenPaddingInsets,
-      padding: AppSpacing.elementPaddingInsets,
-      decoration: BoxDecoration(
-        color: AppColors.expenseAlertBackground,
-        borderRadius: AppRadius.borderRadiusMedium,
-        border: Border.all(color: AppColors.borderGrey),
-      ),
-      child: Row(
-        children: [
-          const Icon(
-            Icons.error_outline,
-            color: AppColors.expenseAlertText,
-            size: 18,
-          ),
-          AppSpacing.horizontalGap,
-          Expanded(
-            child: Text(
-              'আপডেট চেক করতে সমস্যা হয়েছে: $message',
-              style: AppTypography.caption.copyWith(
-                color: AppColors.expenseAlertText,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// নতুন ভার্সন উপলব্ধ থাকলে নোটিফিকেশন কার্ড
   Widget _buildUpdateAvailable(
     BuildContext context,
     UpdateInfo info,
@@ -90,9 +40,11 @@ class UpdateNotificationWidget extends StatelessWidget {
   ) {
     final isDownloading = updateProvider.isDownloading;
     final progress = updateProvider.downloadProgress;
+    final downloadError = updateProvider.downloadError;
+    final percent = (progress * 100).toInt();
 
     return Container(
-      margin: AppSpacing.screenPaddingInsets,
+      margin: const EdgeInsets.only(bottom: 16),
       padding: AppSpacing.elementPaddingInsets,
       decoration: BoxDecoration(
         color: AppColors.softLightPurple,
@@ -105,9 +57,9 @@ class UpdateNotificationWidget extends StatelessWidget {
           Row(
             children: [
               const Icon(
-                Icons.update,
+                Icons.system_update_rounded,
                 color: AppColors.primaryPurple,
-                size: 20,
+                size: 22,
               ),
               AppSpacing.horizontalGap,
               Expanded(
@@ -119,54 +71,116 @@ class UpdateNotificationWidget extends StatelessWidget {
                   ),
                 ),
               ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.primaryPurple,
+                  borderRadius: AppRadius.borderRadiusSmall,
+                ),
+                child: Text(
+                  'v${info.latestVersion}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
             ],
           ),
           AppSpacing.smallVerticalGap,
           Text(
             'বর্তমান: ${info.currentVersion} → নতুন: ${info.latestVersion}',
-            style: AppTypography.body.copyWith(
-              color: AppColors.primaryText,
-              fontSize: 14,
+            style: AppTypography.caption.copyWith(
+              color: AppColors.secondaryText,
             ),
           ),
-          AppSpacing.largeVerticalGap,
+          if (info.releaseNotes != null && info.releaseNotes!.isNotEmpty) ...[
+            AppSpacing.smallVerticalGap,
+            Text(
+              info.releaseNotes!,
+              style: AppTypography.caption.copyWith(
+                color: AppColors.primaryText,
+                fontStyle: FontStyle.italic,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+          if (downloadError != null) ...[
+            AppSpacing.smallVerticalGap,
+            Text(
+              downloadError,
+              style: AppTypography.caption.copyWith(
+                color: AppColors.expenseAlertText,
+              ),
+            ),
+          ],
+          AppSpacing.elementGap,
           if (isDownloading) ...[
             LinearProgressIndicator(
-              value: progress,
+              value: progress > 0 ? progress : null,
               backgroundColor: AppColors.borderGrey,
               color: AppColors.primaryPurple,
             ),
             AppSpacing.smallVerticalGap,
-            Text(
-              'ডাউনলোড করা হচ্ছে...',
-              style: AppTypography.caption.copyWith(
-                color: AppColors.secondaryText,
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'ডাউনলোড হচ্ছে...',
+                  style: AppTypography.caption.copyWith(
+                    color: AppColors.secondaryText,
+                  ),
+                ),
+                Text(
+                  '$percent%',
+                  style: AppTypography.caption.copyWith(
+                    color: AppColors.primaryPurple,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
             ),
-            AppSpacing.largeVerticalGap,
+            AppSpacing.smallVerticalGap,
           ],
           SizedBox(
             width: double.infinity,
-            child: OutlinedButton(
+            child: ElevatedButton.icon(
               onPressed: isDownloading
                   ? null
-                  : () {
-                      updateProvider.downloadAndInstallUpdate();
+                  : () async {
+                      if (info.apkDownloadUrl != null) {
+                        updateProvider.downloadAndInstallUpdate();
+                      } else {
+                        // Fallback to browser if direct APK asset is not attached
+                        final uri = Uri.parse(info.releaseUrl);
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        }
+                      }
                     },
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.primaryPurple,
-                side: const BorderSide(color: AppColors.primaryPurple),
+              icon: Icon(
+                isDownloading ? Icons.downloading_rounded : Icons.update_rounded,
+                size: 18,
+                color: Colors.white,
+              ),
+              label: Text(
+                isDownloading
+                    ? 'ডাউনলোড চলছে ($percent%)...'
+                    : 'আপডেট ইনস্টল করুন',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primaryPurple,
                 shape: RoundedRectangleBorder(
                   borderRadius: AppRadius.borderRadiusMedium,
                 ),
-                padding: const EdgeInsets.symmetric(vertical: 10),
-              ),
-              child: Text(
-                isDownloading ? 'ডাউনলোড চলছে...' : 'আপডেট ডাউনলোড করুন',
-                style: AppTypography.body.copyWith(
-                  color: AppColors.primaryPurple,
-                  fontSize: 14,
-                ),
+                padding: const EdgeInsets.symmetric(vertical: 12),
               ),
             ),
           ),

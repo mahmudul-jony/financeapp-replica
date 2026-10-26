@@ -1,31 +1,24 @@
-/// GitHub Release-ভিত্তিক আপডেট চেক সার্ভিস।
-///
-/// `https://api.github.com/repos/mahmudul-jony/financeapp-replica/releases/latest`
-/// এন্ডপয়েন্ট থেকে লেটেস্ট রিলিজের তথ্য সংগ্রহ করে।
-///
-/// শুধু versiòn-চেক ইমপ্লিমেন্ট করা হয়েছে। APK ডাউনলোড বা ইনস্টলেশন এখনই করা হয়নি।
 import 'dart:convert';
-
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/update_info.dart';
 
 class UpdateService {
-  /// গিঠব রেলিজ API এন্ডপয়েন্ট
+  /// GitHub release API endpoint
   static const String _githubApiUrl =
       'https://api.github.com/repos/mahmudul-jony/financeapp-replica/releases/latest';
 
-  /// 앱ের বর্তমান ভার্সন ও গিঠব লেটেস্ট রিলিজের ভার্সন তুলনা করে আপডেট তথ্য রিটার্ন করে।
+  /// Compares current installed version with the latest GitHub release
   Future<UpdateInfo> checkForUpdates() async {
-    // ১. পাবস্পেক.yaml থেকে ইনস্টল করা App-এর ভার্সন সংগ্রহ (বিল্ড নম্বর ছাড়া)
     final packageInfo = await PackageInfo.fromPlatform();
-    final currentVersion = packageInfo.version; // 예: "1.0.0" (বিল্ড নম্বর ছাড়া)
-    // বিল্ড নম্বর (packageInfo.buildNumber) তুলনায় ব্যবহার করা হয়নি,
-    // যাতে 1.0.0+1 এর "+1"-কে সরাসরি ট্যাগ ভার্সনের সাথে তুলনা করে ভুল সিদ্ধান্ত না নিতে হয়।
+    final currentVersionOnly = packageInfo.version.trim();
+    final currentBuildOnly = packageInfo.buildNumber.trim();
+    final currentFullVersion = currentBuildOnly.isNotEmpty
+        ? '$currentVersionOnly+$currentBuildOnly'
+        : currentVersionOnly;
 
     try {
-      // ২. গিঠব API থেকে লেটেস্ট রিলিজ সংগ্রহ
       final response = await http.get(
         Uri.parse(_githubApiUrl),
         headers: {
@@ -36,19 +29,18 @@ class UpdateService {
 
       if (response.statusCode != 200) {
         return UpdateInfo.error(
-          currentVersion,
-          'গিঠব API এরর: স্ট্যাটাস কোড ${response.statusCode}',
+          currentFullVersion,
+          'GitHub API Error: HTTP ${response.statusCode}',
         );
       }
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
 
-      // রিলিজ ট্যাগ ন্যામ (যেমন: "v1.0.1" বা "1.0.1")
-      final tagName = (data['tag_name'] as String? ?? '').trim();
-      // রিলিজ পেজ URL
-      final releaseUrl = (data['html_url'] as String? ?? '');
+      final rawTagName = (data['tag_name'] as String? ?? '').trim();
+      final releaseUrl = (data['html_url'] as String? ?? '').trim();
+      final releaseBody = (data['body'] as String? ?? '').trim();
 
-      // APK অ্যাসেটের ডাউনলোড URL সংগ্রহ (যদি থাকে)
+      // Find APK download URL from release assets
       String? apkDownloadUrl;
       final assets = data['assets'] as List<dynamic>? ?? [];
       for (final asset in assets) {
@@ -60,59 +52,101 @@ class UpdateService {
         }
       }
 
-      // ট্যাগ থেকে 'v' প্রিফিক্স সরিয়ে শুধু ভার্সন 부분 নেওয়া
-      final versionWithoutPrefix =
-    tagName.startsWith('v') ? tagName.substring(1) : tagName;
+      // Remove leading 'v' or 'V' prefix
+      final latestFullVersion = rawTagName.startsWith(RegExp(r'^[vV]'))
+          ? rawTagName.substring(1).trim()
+          : rawTagName;
 
-final latestVersion = versionWithoutPrefix.split('+').first;
+      if (latestFullVersion.isEmpty) {
+        return UpdateInfo.noUpdate(currentFullVersion);
+      }
 
-      // ৩. ভার্সন তুলনা (বিল্ড নম্বর berücksicht করা হবে না)
-      final isUpdateAvailable = _isVersionNewer(latestVersion, currentVersion);
+      final bool isUpdateAvailable = isVersionNewer(
+        latestStr: latestFullVersion,
+        currentVersionStr: currentVersionOnly,
+        currentBuildStr: currentBuildOnly,
+      );
 
       if (!isUpdateAvailable) {
-        return UpdateInfo.noUpdate(currentVersion);
+        return UpdateInfo.noUpdate(currentFullVersion);
       }
 
       return UpdateInfo(
         isUpdateAvailable: true,
-        latestVersion: latestVersion,
-        currentVersion: currentVersion,
+        latestVersion: latestFullVersion,
+        currentVersion: currentFullVersion,
         releaseUrl: releaseUrl,
         apkDownloadUrl: apkDownloadUrl,
         status: UpdateStatus.success,
+        releaseNotes: releaseBody.isNotEmpty ? releaseBody : null,
       );
     } on FormatException catch (e) {
-      return UpdateInfo.error(currentVersion, 'ইনভ্যালিড রেসপন্স: ${e.message}');
+      return UpdateInfo.error(currentFullVersion, 'Invalid response format: ${e.message}');
     } catch (e) {
-      return UpdateInfo.error(currentVersion, 'নেটওয়ার্ক এরর: $e');
+      return UpdateInfo.error(currentFullVersion, 'Network error: $e');
     }
   }
 
-  /// দুটি সেমান্টিক ভার্সন String তুলনা করে `latest` বড় কি না চেক করে।
-  ///
-  /// শুধু major.minor.patch ডিবিসি ব্যবহার করে, বিল্ড নম্বর উপেক্ষা করে।
-  /// উদাহরণ: "1.0.1" vs "1.0.0" → true; "1.0.0" vs "1.0.0" → false
-  bool _isVersionNewer(String latest, String current) {
-    // numeric portion-এ split,inton ? 0 : parsed
-    final latestParts = _parseVersionParts(latest);
-    final currentParts = _parseVersionParts(current);
+  /// Parses and compares semver and build number
+  /// Returns true if latest version is strictly greater than current version
+  static bool isVersionNewer({
+    required String latestStr,
+    required String currentVersionStr,
+    String? currentBuildStr,
+  }) {
+    final latestParsed = _parseVersion(latestStr);
+    final currentParsed = _parseVersion(
+      currentBuildStr != null && currentBuildStr.isNotEmpty
+          ? '$currentVersionStr+$currentBuildStr'
+          : currentVersionStr,
+    );
 
-    for (int i = 0; i < 3; i++) {
-      final l = latestParts[i];
-      final c = currentParts[i];
-      if (l > c) return true;
-      if (l < c) return false;
-    }
-    return false; // সমান হলে আপডেট প্রয়োজন নেই
+    return latestParsed.compareTo(currentParsed) > 0;
   }
 
-  /// "1.0.1"-ফরম্যাটের স্ট্রিংকে [int, int, int] লিস্টে রূপান্তর করে।
-  /// অশুধু বা অপূর্ণ হলে ০ দিয়ে পূরণ করে।
-  List<int> _parseVersionParts(String version) {
-    final parts = version.split('.');
-    return List.generate(3, (i) {
-      if (i >= parts.length) return 0;
-      return int.tryParse(parts[i].trim()) ?? 0;
+  static _ParsedVersion _parseVersion(String versionString) {
+    var raw = versionString.trim();
+    if (raw.startsWith(RegExp(r'^[vV]'))) {
+      raw = raw.substring(1).trim();
+    }
+
+    int build = 0;
+    if (raw.contains('+')) {
+      final parts = raw.split('+');
+      raw = parts[0].trim();
+      if (parts.length > 1) {
+        build = int.tryParse(parts[1].trim()) ?? 0;
+      }
+    }
+
+    final segments = raw.split('.');
+    final parts = List<int>.generate(3, (i) {
+      if (i < segments.length) {
+        final match = RegExp(r'^\d+').firstMatch(segments[i].trim());
+        if (match != null) {
+          return int.tryParse(match.group(0)!) ?? 0;
+        }
+      }
+      return 0;
     });
+
+    return _ParsedVersion(parts: parts, buildNumber: build);
+  }
+}
+
+class _ParsedVersion {
+  final List<int> parts; // [major, minor, patch]
+  final int buildNumber;
+
+  const _ParsedVersion({required this.parts, required this.buildNumber});
+
+  int compareTo(_ParsedVersion other) {
+    for (int i = 0; i < 3; i++) {
+      if (parts[i] > other.parts[i]) return 1;
+      if (parts[i] < other.parts[i]) return -1;
+    }
+    if (buildNumber > other.buildNumber) return 1;
+    if (buildNumber < other.buildNumber) return -1;
+    return 0;
   }
 }
