@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:financeapp/app_constants.dart';
 import 'package:financeapp/screens/banking_dashboard_screen.dart';
+import 'package:financeapp/widgets/update_checker.dart';
 
 class SignInScreen extends StatelessWidget {
   const SignInScreen({super.key});
@@ -14,6 +15,7 @@ class SignInScreen extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.screenPadding),
           child: Column(
             children: [
+              const UpdateChecker(),
               const Spacer(),
               Container(
                 width: 80,

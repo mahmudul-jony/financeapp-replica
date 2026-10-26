@@ -98,7 +98,7 @@ class _AnalyticsDashboardScreenState extends State<AnalyticsDashboardScreen> wit
           icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.primaryText, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Analytics Dashboard', style: AppTypography.title),
+        title: const Text('Dashboard', style: AppTypography.title),
         centerTitle: false,
       ),
       body: Column(

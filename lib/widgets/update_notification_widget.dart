@@ -1,6 +1,6 @@
 /// নতুন ভার্সন উপলব্ধ হলে UI-তে দেখানোর জন্য উইজেট।
 ///
-/// বিদ্যমান স্ক্রিন বা ফাংশনালিটিতে অপ্রয়োজনীয় পরিবর্তন না করে এই উইজেটটি
+/// বিদ্যমান স্ক্রিন বা ফাংশনালিটিতে অপ্রয়োজনীয় পরিবর্তন না করে এইウィজেটটি
 /// যেকোনো স্ক্রিনে যোগ করা যায়। `UpdateProvider`-এর মাধ্যমে `context.watch`
 /// ব্যবহার করে স্টেট derive করা হয়।
 ///
@@ -31,7 +31,7 @@ class UpdateNotificationWidget extends StatelessWidget {
         return const SizedBox.shrink();
       case UpdateStatus.success:
         if (!info.isUpdateAvailable) return const SizedBox.shrink();
-        return _buildUpdateAvailable(context, info);
+        return _buildUpdateAvailable(context, info, updateProvider);
     }
   }
 
@@ -83,7 +83,14 @@ class UpdateNotificationWidget extends StatelessWidget {
   }
 
   /// নতুন ভার্সন উপলব্ধ থাকলে নোটিফিকেশন কার্ড
-  Widget _buildUpdateAvailable(BuildContext context, UpdateInfo info) {
+  Widget _buildUpdateAvailable(
+    BuildContext context,
+    UpdateInfo info,
+    UpdateProvider updateProvider,
+  ) {
+    final isDownloading = updateProvider.isDownloading;
+    final progress = updateProvider.downloadProgress;
+
     return Container(
       margin: AppSpacing.screenPaddingInsets,
       padding: AppSpacing.elementPaddingInsets,
@@ -123,13 +130,29 @@ class UpdateNotificationWidget extends StatelessWidget {
             ),
           ),
           AppSpacing.largeVerticalGap,
+          if (isDownloading) ...[
+            LinearProgressIndicator(
+              value: progress,
+              backgroundColor: AppColors.borderGrey,
+              color: AppColors.primaryPurple,
+            ),
+            AppSpacing.smallVerticalGap,
+            Text(
+              'ডাউনলোড করা হচ্ছে...',
+              style: AppTypography.caption.copyWith(
+                color: AppColors.secondaryText,
+              ),
+            ),
+            AppSpacing.largeVerticalGap,
+          ],
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
-              onPressed: () {
-                // রিলিজ পেজে যাওয়ার লিঙ্ক ওপেন করা যেতে পারে URLLauncher দিয়ে
-                // (এখনই ইমপ্লিমেন্ট করা হয়নি - শুধু UI প্রস্তুত)
-              },
+              onPressed: isDownloading
+                  ? null
+                  : () {
+                      updateProvider.downloadAndInstallUpdate();
+                    },
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.primaryPurple,
                 side: const BorderSide(color: AppColors.primaryPurple),
@@ -139,7 +162,7 @@ class UpdateNotificationWidget extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 10),
               ),
               child: Text(
-                'রিলিজ পেজে যান',
+                isDownloading ? 'ডাউনলোড চলছে...' : 'আপডেট ডাউনলোড করুন',
                 style: AppTypography.body.copyWith(
                   color: AppColors.primaryPurple,
                   fontSize: 14,
