@@ -63,17 +63,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Preferences', style: AppTypography.caption),
-        const SizedBox(height: 12),
+        AppSpacing.verticalGap,
         _buildWeekStartDaySelector(),
-        const SizedBox(height: 12),
+        AppSpacing.verticalGap,
         _buildToggleItem('Dark Mode', Icons.dark_mode_rounded, _isDarkMode, (v) => setState(() => _isDarkMode = v)),
-        const SizedBox(height: 12),
+        AppSpacing.verticalGap,
         _buildClickableItem('Account Settings', Icons.manage_accounts_rounded),
-        const SizedBox(height: 12),
+        AppSpacing.verticalGap,
         _buildClickableItem('Notifications', Icons.notifications_active_rounded),
-        const SizedBox(height: 12),
+        AppSpacing.verticalGap,
         _buildSyncButton(),
-        const SizedBox(height: 12),
+        AppSpacing.verticalGap,
         _buildResetButton(),
       ],
     ),
@@ -121,7 +121,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       provider.syncFromSheet();
     },
     child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(color: Colors.white, borderRadius: AppRadius.borderRadiusMedium),
       child: const Row(
         children: [
@@ -137,7 +137,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildResetButton() => GestureDetector(
     onTap: () => _showResetConfirmation(context),
     child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(color: Colors.white, borderRadius: AppRadius.borderRadiusMedium),
       child: const Row(
         children: [
@@ -166,7 +166,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildClickableItem(String label, IconData icon, {VoidCallback? onTap}) => GestureDetector(
     onTap: onTap,
     child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(color: Colors.white, borderRadius: AppRadius.borderRadiusMedium),
       child: Row(
         children: [
