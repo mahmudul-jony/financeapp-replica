@@ -5,7 +5,7 @@ import '../models/transaction_model.dart';
 
 class SyncService {
   // Deployed Web App URL from Apps Scripts
-  static const String _scriptUrl = "https://script.google.com/macros/s/AKfycbw0OCzz3ghCT5WOY13trQCuRb0brjmqnW99J93KCmHvVyVp05kRJz9ZpXC5DBGCCVdZwA/exec";
+  static const String _scriptUrl = "https://script.google.com/macros/s/AKfycby8ONkqnwHncgrFniBxN8sCGEniukKiRaGFj2XxmJwEYeeIqzZXDjJr_U2joPmN5L7_yw/exec";
 
   static Future<bool> isBackendReachable() async {
     if (_scriptUrl.isEmpty) return false;
