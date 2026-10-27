@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -97,6 +97,35 @@ class DatabaseHelper {
         )
       ''');
     }
+    if (oldVersion < 7) {
+      // Version 7: Offline sync queue and tracking columns
+      try {
+        await db.execute('ALTER TABLE transactions ADD COLUMN sync_id TEXT');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE transactions ADD COLUMN sync_status TEXT DEFAULT "synced"');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE transactions ADD COLUMN updated_at TEXT');
+      } catch (_) {}
+
+      await db.execute('UPDATE transactions SET sync_id = CAST(id AS TEXT) WHERE sync_id IS NULL OR sync_id = ""');
+      await db.execute('UPDATE transactions SET updated_at = date WHERE updated_at IS NULL');
+      await db.execute('UPDATE transactions SET sync_status = "synced" WHERE sync_status IS NULL OR sync_status = ""');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS sync_queue (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          entity_type TEXT NOT NULL,
+          entity_id TEXT NOT NULL,
+          action TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          retry_count INTEGER DEFAULT 0,
+          last_error TEXT
+        )
+      ''');
+    }
   }
 
   Future _createDB(Database db, int version) async {
@@ -128,6 +157,7 @@ class DatabaseHelper {
     await db.execute('''
       CREATE TABLE transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sync_id TEXT UNIQUE,
         title TEXT NOT NULL,
         amount REAL NOT NULL,
         date TEXT NOT NULL,
@@ -136,6 +166,8 @@ class DatabaseHelper {
         walletId INTEGER NOT NULL,
         toWalletId INTEGER,
         categoryId INTEGER,
+        sync_status TEXT DEFAULT 'synced',
+        updated_at TEXT,
         FOREIGN KEY (walletId) REFERENCES wallets (id),
         FOREIGN KEY (toWalletId) REFERENCES wallets (id),
         FOREIGN KEY (categoryId) REFERENCES categories (id)
@@ -231,6 +263,20 @@ class DatabaseHelper {
       )
     ''');
 
+    // Sync Queue Table
+    await db.execute('''
+      CREATE TABLE sync_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        retry_count INTEGER DEFAULT 0,
+        last_error TEXT
+      )
+    ''');
+
     // Insert Default Wallet
     await db.insert('wallets', {
       'name': 'Main Wallet',
@@ -287,6 +333,35 @@ class DatabaseHelper {
     );
   }
 
+  // Sync Queue Helpers
+  Future<int> insertSyncQueue(Map<String, dynamic> row) async {
+    final db = await instance.database;
+    return await db.insert('sync_queue', row);
+  }
+
+  Future<List<Map<String, dynamic>>> getSyncQueue() async {
+    final db = await instance.database;
+    return await db.query('sync_queue', orderBy: 'id ASC');
+  }
+
+  Future<int> deleteSyncQueueItem(int id) async {
+    final db = await instance.database;
+    return await db.delete('sync_queue', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> updateSyncQueueRetry(int id, String error) async {
+    final db = await instance.database;
+    await db.execute(
+      'UPDATE sync_queue SET retry_count = retry_count + 1, last_error = ? WHERE id = ?',
+      [error, id],
+    );
+  }
+
+  Future<void> clearSyncQueue() async {
+    final db = await instance.database;
+    await db.delete('sync_queue');
+  }
+
   Future<void> resetDatabase() async {
     final db = await instance.database;
     await db.delete('wallets');
@@ -299,6 +374,7 @@ class DatabaseHelper {
     await db.delete('savings');
     await db.delete('savings_transactions');
     await db.delete('savings_allocations');
+    await db.delete('sync_queue');
 
     // Insert Default Wallet
     await db.insert('wallets', {

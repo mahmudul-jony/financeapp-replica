@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 import '../database/db_helper.dart';
@@ -11,7 +13,7 @@ import '../services/sync_service.dart';
 
 enum FilterType { today, week, month, year }
 
-class FinanceProvider with ChangeNotifier {
+class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   List<Wallet> _wallets = [];
   List<Category> _categories = [];
   List<TransactionModel> _transactions = [];
@@ -21,6 +23,17 @@ class FinanceProvider with ChangeNotifier {
   List<InvestmentTransaction> _investmentTransactions = [];
   List<Savings> _savings = [];
   List<SavingsTransaction> _savingsTransactions = [];
+
+  // Sync state
+  bool _isSyncing = false;
+  bool _syncRequestedAgain = false;
+  String? _syncStatusMessage;
+  DateTime? _lastSyncTime;
+  Timer? _periodicSyncTimer;
+
+  bool get isSyncing => _isSyncing;
+  String? get syncStatusMessage => _syncStatusMessage;
+  DateTime? get lastSyncTime => _lastSyncTime;
 
   // Filter & Preferences State
   FilterType _currentFilter = FilterType.month;
@@ -125,7 +138,42 @@ class FinanceProvider with ChangeNotifier {
   List<SavingsTransaction> get savingsTransactions => _savingsTransactions;
 
   FinanceProvider() {
-    fetchAll();
+    WidgetsBinding.instance.addObserver(this);
+    _init();
+  }
+
+  Future<void> _init() async {
+    await fetchAll();
+    _startPeriodicSync();
+    // Auto-sync on app startup
+    syncNow();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      syncNow();
+    }
+  }
+
+  void _startPeriodicSync() {
+    _periodicSyncTimer?.cancel();
+    // Periodic sync check every 30 seconds for pending offline changes
+    _periodicSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
+      try {
+        final queue = await DatabaseHelper.instance.getSyncQueue();
+        if (queue.isNotEmpty && !_isSyncing) {
+          syncNow();
+        }
+      } catch (_) {}
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _periodicSyncTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> fetchAll() async {
@@ -142,12 +190,11 @@ class FinanceProvider with ChangeNotifier {
 
   void _validateAmount(double amount) {
     if (amount <= 0) throw Exception("Amount must be greater than zero");
-    if (amount.isNaN || amount.isInfinite) throw Exception("Invalid amount");
   }
 
   Future<void> _ensureWalletActive(int walletId) async {
     final wallet = _wallets.firstWhere((w) => w.id == walletId);
-    if (wallet.isArchived) throw Exception("Wallet is archived and cannot be used");
+    if (wallet.isArchived) throw Exception("Cannot perform transactions on an archived wallet");
   }
 
   // --- Wallet Methods ---
@@ -168,7 +215,19 @@ class FinanceProvider with ChangeNotifier {
     await fetchWallets();
     
     final savedWallet = _wallets.firstWhere((w) => w.id == id);
-    _triggerWalletSync(savedWallet);
+    
+    // Queue create tab for sheet
+    final db = await DatabaseHelper.instance.database;
+    await db.insert('sync_queue', {
+      'entity_type': 'wallet',
+      'entity_id': id.toString(),
+      'action': 'create_tab',
+      'payload': jsonEncode({'tabName': wallet.name}),
+      'created_at': DateTime.now().toIso8601String(),
+      'retry_count': 0,
+      'last_error': null,
+    });
+    syncNow();
 
     if (wallet.balance > 0) {
       final defaultCat = _categories.firstWhere((c) => c.type == CategoryType.income, orElse: () => _categories.first);
@@ -177,11 +236,7 @@ class FinanceProvider with ChangeNotifier {
   }
 
   void _triggerWalletSync(Wallet wallet) {
-    try {
-      SyncService.createTab(wallet.name);
-    } catch (e) {
-      print("Wallet sync error: $e");
-    }
+    SyncService.createTab(wallet.name);
   }
 
   Future<void> updateWallet(Wallet wallet) async {
@@ -193,8 +248,26 @@ class FinanceProvider with ChangeNotifier {
     await fetchWallets();
 
     if (oldName.isNotEmpty && oldName != newName) {
-      await SyncService.renameTab(oldName, newName);
-      await SyncService.updateWalletName(oldName, newName);
+      final db = await DatabaseHelper.instance.database;
+      await db.insert('sync_queue', {
+        'entity_type': 'wallet',
+        'entity_id': wallet.id.toString(),
+        'action': 'rename_tab',
+        'payload': jsonEncode({'oldTabName': oldName, 'newTabName': newName}),
+        'created_at': DateTime.now().toIso8601String(),
+        'retry_count': 0,
+        'last_error': null,
+      });
+      await db.insert('sync_queue', {
+        'entity_type': 'wallet',
+        'entity_id': wallet.id.toString(),
+        'action': 'update_wallet_name',
+        'payload': jsonEncode({'oldName': oldName, 'newName': newName}),
+        'created_at': DateTime.now().toIso8601String(),
+        'retry_count': 0,
+        'last_error': null,
+      });
+      syncNow();
     }
   }
 
@@ -242,7 +315,16 @@ class FinanceProvider with ChangeNotifier {
     await fetchTransactions();
 
     if (oldName != newName) {
-      await SyncService.updateCategoryName(oldName, newName);
+      await db.insert('sync_queue', {
+        'entity_type': 'category',
+        'entity_id': category.id.toString(),
+        'action': 'update_category_name',
+        'payload': jsonEncode({'oldName': oldName, 'newName': newName}),
+        'created_at': DateTime.now().toIso8601String(),
+        'retry_count': 0,
+        'last_error': null,
+      });
+      syncNow();
     }
   }
 
@@ -270,25 +352,29 @@ class FinanceProvider with ChangeNotifier {
     await _ensureWalletActive(walletId);
     final db = await DatabaseHelper.instance.database;
 
-    int id = 0;
+    final cat = _categories.firstWhere((c) => c.id == categoryId);
+    final now = DateTime.now();
+    final tx = TransactionModel(
+      title: cat.name,
+      amount: amount,
+      date: date,
+      note: note,
+      type: TransactionType.income,
+      walletId: walletId,
+      categoryId: categoryId,
+      syncStatus: 'pending',
+      updatedAt: now,
+    );
+
     await db.transaction((txn) async {
-      final cat = _categories.firstWhere((c) => c.id == categoryId);
-      final tx = TransactionModel(
-        title: cat.name,
-        amount: amount,
-        date: date,
-        note: note,
-        type: TransactionType.income,
-        walletId: walletId,
-        categoryId: categoryId,
-      );
-      id = await txn.insert('transactions', tx.toMap());
+      final id = await txn.insert('transactions', tx.toMap());
       await txn.execute('UPDATE wallets SET balance = balance + ? WHERE id = ?', [amount, walletId]);
+      await _enqueueTxSyncInTx(txn, tx.copyWith(id: id), 'create');
     });
 
     await fetchTransactions();
     await fetchWallets();
-    _triggerSync(id);
+    syncNow();
   }
 
   Future<void> addExpense(double amount, int walletId, int categoryId, DateTime date, String note) async {
@@ -298,25 +384,29 @@ class FinanceProvider with ChangeNotifier {
     if (amount > wallet.balance) throw Exception("Insufficient withdrawable balance");
 
     final db = await DatabaseHelper.instance.database;
-    int id = 0;
+    final cat = _categories.firstWhere((c) => c.id == categoryId);
+    final now = DateTime.now();
+    final tx = TransactionModel(
+      title: cat.name,
+      amount: amount,
+      date: date,
+      note: note,
+      type: TransactionType.expense,
+      walletId: walletId,
+      categoryId: categoryId,
+      syncStatus: 'pending',
+      updatedAt: now,
+    );
+
     await db.transaction((txn) async {
-      final cat = _categories.firstWhere((c) => c.id == categoryId);
-      final tx = TransactionModel(
-        title: cat.name,
-        amount: amount,
-        date: date,
-        note: note,
-        type: TransactionType.expense,
-        walletId: walletId,
-        categoryId: categoryId,
-      );
-      id = await txn.insert('transactions', tx.toMap());
+      final id = await txn.insert('transactions', tx.toMap());
       await txn.execute('UPDATE wallets SET balance = balance - ? WHERE id = ?', [amount, walletId]);
+      await _enqueueTxSyncInTx(txn, tx.copyWith(id: id), 'create');
     });
 
     await fetchTransactions();
     await fetchWallets();
-    _triggerSync(id);
+    syncNow();
   }
 
   Future<void> addTransfer(double amount, int fromWalletId, int toWalletId, DateTime date, String note) async {
@@ -329,25 +419,29 @@ class FinanceProvider with ChangeNotifier {
     if (amount > fromWallet.balance) throw Exception("Insufficient withdrawable balance");
 
     final db = await DatabaseHelper.instance.database;
-    int id = 0;
+    final now = DateTime.now();
+    final tx = TransactionModel(
+      title: 'Transfer',
+      amount: amount,
+      date: date,
+      note: note,
+      type: TransactionType.transfer,
+      walletId: fromWalletId,
+      toWalletId: toWalletId,
+      syncStatus: 'pending',
+      updatedAt: now,
+    );
+
     await db.transaction((txn) async {
-      final tx = TransactionModel(
-        title: 'Transfer',
-        amount: amount,
-        date: date,
-        note: note,
-        type: TransactionType.transfer,
-        walletId: fromWalletId,
-        toWalletId: toWalletId,
-      );
-      id = await txn.insert('transactions', tx.toMap());
+      final id = await txn.insert('transactions', tx.toMap());
       await txn.execute('UPDATE wallets SET balance = balance - ? WHERE id = ?', [amount, fromWalletId]);
       await txn.execute('UPDATE wallets SET balance = balance + ? WHERE id = ?', [amount, toWalletId]);
+      await _enqueueTxSyncInTx(txn, tx.copyWith(id: id), 'create');
     });
 
     await fetchTransactions();
     await fetchWallets();
-    _triggerSync(id);
+    syncNow();
   }
 
   // --- Loan Methods ---
@@ -370,7 +464,8 @@ class FinanceProvider with ChangeNotifier {
     if (amount > wallet.balance) throw Exception("Insufficient withdrawable balance");
 
     final db = await DatabaseHelper.instance.database;
-    int gtxId = 0;
+    final now = DateTime.now();
+
     await db.transaction((txn) async {
       final List<Map<String, dynamic>> existing = await txn.query(
         'loan_recipients',
@@ -412,15 +507,18 @@ class FinanceProvider with ChangeNotifier {
         type: existing.isEmpty ? TransactionType.loanGiven : TransactionType.loanGivenMore,
         walletId: walletId,
         categoryId: null,
+        syncStatus: 'pending',
+        updatedAt: now,
       );
-      gtxId = await txn.insert('transactions', gtx.toMap());
+      final gtxId = await txn.insert('transactions', gtx.toMap());
+      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
     });
     
     await fetchLoans();
     await fetchLoanTransactions();
     await fetchWallets();
     await fetchTransactions();
-    _triggerSync(gtxId);
+    syncNow();
   }
 
   Future<void> recoverLoan(int recipientId, double amount, int walletId, DateTime date, String note) async {
@@ -428,7 +526,8 @@ class FinanceProvider with ChangeNotifier {
     await _ensureWalletActive(walletId);
     
     final db = await DatabaseHelper.instance.database;
-    int gtxId = 0;
+    final now = DateTime.now();
+
     await db.transaction((txn) async {
       final List<Map<String, dynamic>> recs = await txn.query('loan_recipients', where: 'id = ?', whereArgs: [recipientId]);
       if (recs.isEmpty) throw Exception("Recipient not found");
@@ -461,15 +560,18 @@ class FinanceProvider with ChangeNotifier {
         type: TransactionType.loanRecovered,
         walletId: walletId,
         categoryId: null,
+        syncStatus: 'pending',
+        updatedAt: now,
       );
-      gtxId = await txn.insert('transactions', gtx.toMap());
+      final gtxId = await txn.insert('transactions', gtx.toMap());
+      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
     });
 
     await fetchLoans();
     await fetchLoanTransactions();
     await fetchWallets();
     await fetchTransactions();
-    _triggerSync(gtxId);
+    syncNow();
   }
 
   Future<void> giveMoreLoan(int recipientId, double amount, int walletId, DateTime date, String note) async {
@@ -479,7 +581,8 @@ class FinanceProvider with ChangeNotifier {
     if (amount > wallet.balance) throw Exception("Insufficient withdrawable balance");
 
     final db = await DatabaseHelper.instance.database;
-    int gtxId = 0;
+    final now = DateTime.now();
+
     await db.transaction((txn) async {
       final List<Map<String, dynamic>> recs = await txn.query('loan_recipients', where: 'id = ?', whereArgs: [recipientId]);
       if (recs.isEmpty) throw Exception("Recipient not found");
@@ -509,15 +612,18 @@ class FinanceProvider with ChangeNotifier {
         type: TransactionType.loanGivenMore,
         walletId: walletId,
         categoryId: null,
+        syncStatus: 'pending',
+        updatedAt: now,
       );
-      gtxId = await txn.insert('transactions', gtx.toMap());
+      final gtxId = await txn.insert('transactions', gtx.toMap());
+      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
     });
     
     await fetchLoans();
     await fetchLoanTransactions();
     await fetchWallets();
     await fetchTransactions();
-    _triggerSync(gtxId);
+    syncNow();
   }
 
   Future<void> takeLoan(String providerName, double amount, int walletId, DateTime date, String note) async {
@@ -525,7 +631,8 @@ class FinanceProvider with ChangeNotifier {
     await _ensureWalletActive(walletId);
 
     final db = await DatabaseHelper.instance.database;
-    int gtxId = 0;
+    final now = DateTime.now();
+
     await db.transaction((txn) async {
       final List<Map<String, dynamic>> existing = await txn.query(
         'loan_recipients',
@@ -567,15 +674,18 @@ class FinanceProvider with ChangeNotifier {
         type: existing.isEmpty ? TransactionType.loanTaken : TransactionType.loanTakenMore,
         walletId: walletId,
         categoryId: null,
+        syncStatus: 'pending',
+        updatedAt: now,
       );
-      gtxId = await txn.insert('transactions', gtx.toMap());
+      final gtxId = await txn.insert('transactions', gtx.toMap());
+      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
     });
     
     await fetchLoans();
     await fetchLoanTransactions();
     await fetchWallets();
     await fetchTransactions();
-    _triggerSync(gtxId);
+    syncNow();
   }
 
   Future<void> repayLoan(int recipientId, double amount, int walletId, DateTime date, String note) async {
@@ -585,7 +695,8 @@ class FinanceProvider with ChangeNotifier {
     if (amount > wallet.balance) throw Exception("Insufficient withdrawable balance");
 
     final db = await DatabaseHelper.instance.database;
-    int gtxId = 0;
+    final now = DateTime.now();
+
     await db.transaction((txn) async {
       final List<Map<String, dynamic>> recs = await txn.query('loan_recipients', where: 'id = ?', whereArgs: [recipientId]);
       if (recs.isEmpty) throw Exception("Recipient not found");
@@ -618,15 +729,18 @@ class FinanceProvider with ChangeNotifier {
         type: TransactionType.loanRepaid,
         walletId: walletId,
         categoryId: null,
+        syncStatus: 'pending',
+        updatedAt: now,
       );
-      gtxId = await txn.insert('transactions', gtx.toMap());
+      final gtxId = await txn.insert('transactions', gtx.toMap());
+      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
     });
 
     await fetchLoans();
     await fetchLoanTransactions();
     await fetchWallets();
     await fetchTransactions();
-    _triggerSync(gtxId);
+    syncNow();
   }
 
   Future<int?> _getOrCreateCategoryIdInTx(Transaction txn, String name, TransactionType type) async {
@@ -670,9 +784,10 @@ class FinanceProvider with ChangeNotifier {
     if (amount > wallet.balance) throw Exception("Insufficient withdrawable balance");
 
     final db = await DatabaseHelper.instance.database;
-    int gtxId = 0;
+    final now = DateTime.now();
+
     await db.transaction((txn) async {
-      final investmentId = await txn.insert('investments', {
+      final invId = await txn.insert('investments', {
         'title': title,
         'amount': amount,
         'date': date.toIso8601String(),
@@ -680,7 +795,7 @@ class FinanceProvider with ChangeNotifier {
       });
 
       final invTx = InvestmentTransaction(
-        investmentId: investmentId,
+        investmentId: invId,
         amount: amount,
         type: InvestmentTransactionType.invest,
         walletId: walletId,
@@ -698,16 +813,29 @@ class FinanceProvider with ChangeNotifier {
         type: TransactionType.investmentCreated,
         walletId: walletId,
         categoryId: null,
+        syncStatus: 'pending',
+        updatedAt: now,
       );
-      gtxId = await txn.insert('transactions', gtx.toMap());
+      final gtxId = await txn.insert('transactions', gtx.toMap());
+      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
+      
+      // Enqueue create tab
+      await txn.insert('sync_queue', {
+        'entity_type': 'investment',
+        'entity_id': invId.toString(),
+        'action': 'create_tab',
+        'payload': jsonEncode({'tabName': title}),
+        'created_at': now.toIso8601String(),
+        'retry_count': 0,
+        'last_error': null,
+      });
     });
     
     await fetchInvestments();
     await fetchInvestmentTransactions();
     await fetchWallets();
     await fetchTransactions();
-    SyncService.createTab(title);
-    _triggerSync(gtxId);
+    syncNow();
   }
 
   Future<void> moreInvest(int investmentId, double amount, int walletId, DateTime date, String note) async {
@@ -717,7 +845,8 @@ class FinanceProvider with ChangeNotifier {
     if (amount > wallet.balance) throw Exception("Insufficient withdrawable balance");
 
     final db = await DatabaseHelper.instance.database;
-    int gtxId = 0;
+    final now = DateTime.now();
+
     await db.transaction((txn) async {
       final List<Map<String, dynamic>> invs = await txn.query('investments', where: 'id = ?', whereArgs: [investmentId]);
       if (invs.isEmpty) throw Exception("Investment not found");
@@ -744,15 +873,18 @@ class FinanceProvider with ChangeNotifier {
         type: TransactionType.investmentIncreased,
         walletId: walletId,
         categoryId: null,
+        syncStatus: 'pending',
+        updatedAt: now,
       );
-      gtxId = await txn.insert('transactions', gtx.toMap());
+      final gtxId = await txn.insert('transactions', gtx.toMap());
+      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
     });
 
     await fetchInvestments();
     await fetchInvestmentTransactions();
     await fetchWallets();
     await fetchTransactions();
-    _triggerSync(gtxId);
+    syncNow();
   }
 
   Future<void> withdrawInvestment(int investmentId, double amount, int walletId, DateTime date, String note) async {
@@ -760,7 +892,8 @@ class FinanceProvider with ChangeNotifier {
     await _ensureWalletActive(walletId);
 
     final db = await DatabaseHelper.instance.database;
-    int gtxId = 0;
+    final now = DateTime.now();
+
     await db.transaction((txn) async {
       final List<Map<String, dynamic>> invs = await txn.query('investments', where: 'id = ?', whereArgs: [investmentId]);
       if (invs.isEmpty) throw Exception("Investment not found");
@@ -789,15 +922,18 @@ class FinanceProvider with ChangeNotifier {
         type: TransactionType.investmentWithdraw,
         walletId: walletId,
         categoryId: null,
+        syncStatus: 'pending',
+        updatedAt: now,
       );
-      gtxId = await txn.insert('transactions', gtx.toMap());
+      final gtxId = await txn.insert('transactions', gtx.toMap());
+      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
     });
 
     await fetchInvestments();
     await fetchInvestmentTransactions();
     await fetchWallets();
     await fetchTransactions();
-    _triggerSync(gtxId);
+    syncNow();
   }
 
   Future<void> addInvestmentProfit(int investmentId, double amount, int walletId, DateTime date, String note) async {
@@ -805,24 +941,12 @@ class FinanceProvider with ChangeNotifier {
     await _ensureWalletActive(walletId);
 
     final db = await DatabaseHelper.instance.database;
-    int gtxId = 0;
+    final now = DateTime.now();
+
     await db.transaction((txn) async {
       final List<Map<String, dynamic>> invs = await txn.query('investments', where: 'id = ?', whereArgs: [investmentId]);
       if (invs.isEmpty) throw Exception("Investment not found");
-      String title = invs.first['title'];
-
-      await txn.execute('UPDATE wallets SET balance = balance + ? WHERE id = ?', [amount, walletId]);
-
-      final gtx = TransactionModel(
-        title: "Investment: $title",
-        amount: amount,
-        date: date,
-        note: note,
-        type: TransactionType.investmentProfit,
-        walletId: walletId,
-        categoryId: null,
-      );
-      gtxId = await txn.insert('transactions', gtx.toMap());
+      final String title = invs.first['title'];
 
       final invTx = InvestmentTransaction(
         investmentId: investmentId,
@@ -833,13 +957,28 @@ class FinanceProvider with ChangeNotifier {
         note: note,
       );
       await txn.insert('investment_transactions', invTx.toMap());
+      await txn.execute('UPDATE wallets SET balance = balance + ? WHERE id = ?', [amount, walletId]);
+
+      final gtx = TransactionModel(
+        title: "Investment: $title",
+        amount: amount,
+        date: date,
+        note: note,
+        type: TransactionType.investmentProfit,
+        walletId: walletId,
+        categoryId: null,
+        syncStatus: 'pending',
+        updatedAt: now,
+      );
+      final gtxId = await txn.insert('transactions', gtx.toMap());
+      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
     });
 
     await fetchInvestments();
     await fetchInvestmentTransactions();
     await fetchWallets();
     await fetchTransactions();
-    _triggerSync(gtxId);
+    syncNow();
   }
 
   Future<void> adjustInvestmentFromWallet(int investmentId, double amount, int walletId, DateTime date, String note) async {
@@ -849,14 +988,12 @@ class FinanceProvider with ChangeNotifier {
     if (amount > wallet.balance) throw Exception("Insufficient withdrawable balance");
 
     final db = await DatabaseHelper.instance.database;
-    int gtxId = 0;
+    final now = DateTime.now();
+
     await db.transaction((txn) async {
       final List<Map<String, dynamic>> invs = await txn.query('investments', where: 'id = ?', whereArgs: [investmentId]);
       if (invs.isEmpty) throw Exception("Investment not found");
       final String title = invs.first['title'];
-
-      // Deduct from wallet's withdrawable balance (Investment principal unchanged)
-      await txn.execute('UPDATE wallets SET balance = balance - ? WHERE id = ?', [amount, walletId]);
 
       final invTx = InvestmentTransaction(
         investmentId: investmentId,
@@ -867,6 +1004,7 @@ class FinanceProvider with ChangeNotifier {
         note: note,
       );
       await txn.insert('investment_transactions', invTx.toMap());
+      await txn.execute('UPDATE wallets SET balance = balance - ? WHERE id = ?', [amount, walletId]);
 
       final gtx = TransactionModel(
         title: "Investment: $title",
@@ -876,36 +1014,39 @@ class FinanceProvider with ChangeNotifier {
         type: TransactionType.investmentExpense,
         walletId: walletId,
         categoryId: null,
+        syncStatus: 'pending',
+        updatedAt: now,
       );
-      gtxId = await txn.insert('transactions', gtx.toMap());
+      final gtxId = await txn.insert('transactions', gtx.toMap());
+      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
     });
 
     await fetchInvestments();
     await fetchInvestmentTransactions();
     await fetchWallets();
     await fetchTransactions();
-    _triggerSync(gtxId);
+    syncNow();
   }
 
   Future<void> adjustInvestmentFromPrincipal(int investmentId, double amount, DateTime date, String note) async {
     _validateAmount(amount);
 
     final db = await DatabaseHelper.instance.database;
-    int gtxId = 0;
+    final now = DateTime.now();
+
     await db.transaction((txn) async {
       final List<Map<String, dynamic>> invs = await txn.query('investments', where: 'id = ?', whereArgs: [investmentId]);
       if (invs.isEmpty) throw Exception("Investment not found");
       final String title = invs.first['title'];
       double currentAmount = (invs.first['amount'] as num).toDouble();
-      if (amount > currentAmount) throw Exception("Adjustment amount exceeds investment remaining principal");
+      if (amount > currentAmount) throw Exception("Expense amount exceeds investment principal balance");
 
-      // Deduct directly from investment principal (Wallet balance unchanged)
       await txn.execute('UPDATE investments SET amount = amount - ? WHERE id = ?', [amount, investmentId]);
 
       final invTx = InvestmentTransaction(
         investmentId: investmentId,
         amount: amount,
-        type: InvestmentTransactionType.adjustment,
+        type: InvestmentTransactionType.expense,
         walletId: 0,
         date: date,
         note: note,
@@ -920,15 +1061,17 @@ class FinanceProvider with ChangeNotifier {
         type: TransactionType.investmentAdjustment,
         walletId: 0,
         categoryId: null,
+        syncStatus: 'pending',
+        updatedAt: now,
       );
-      gtxId = await txn.insert('transactions', gtx.toMap());
+      final gtxId = await txn.insert('transactions', gtx.toMap());
+      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
     });
 
     await fetchInvestments();
     await fetchInvestmentTransactions();
-    await fetchWallets();
     await fetchTransactions();
-    _triggerSync(gtxId);
+    syncNow();
   }
 
   Future<void> deleteInvestment(int id) async {
@@ -959,7 +1102,8 @@ class FinanceProvider with ChangeNotifier {
     if (amount > wallet.balance) throw Exception("Insufficient withdrawable balance");
 
     final db = await DatabaseHelper.instance.database;
-    int gtxId = 0;
+    final now = DateTime.now();
+
     await db.transaction((txn) async {
       final savingsId = await txn.insert('savings', {
         'title': title,
@@ -977,11 +1121,8 @@ class FinanceProvider with ChangeNotifier {
         note: note,
       );
       await txn.insert('savings_transactions', stx.toMap());
-      
-      // Update wallet balances
+
       await txn.execute('UPDATE wallets SET balance = balance - ?, frozen_amount = frozen_amount + ? WHERE id = ?', [amount, amount, walletId]);
-      
-      // Update allocation
       await txn.insert('savings_allocations', {'savingsId': savingsId, 'walletId': walletId, 'amount': amount});
 
       final gtx = TransactionModel(
@@ -992,16 +1133,29 @@ class FinanceProvider with ChangeNotifier {
         type: TransactionType.savingsCreated,
         walletId: walletId,
         categoryId: null,
+        syncStatus: 'pending',
+        updatedAt: now,
       );
-      gtxId = await txn.insert('transactions', gtx.toMap());
+      final gtxId = await txn.insert('transactions', gtx.toMap());
+      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
+      
+      // Enqueue create tab
+      await txn.insert('sync_queue', {
+        'entity_type': 'savings',
+        'entity_id': savingsId.toString(),
+        'action': 'create_tab',
+        'payload': jsonEncode({'tabName': title}),
+        'created_at': now.toIso8601String(),
+        'retry_count': 0,
+        'last_error': null,
+      });
     });
 
     await fetchSavings();
     await fetchSavingsTransactions();
     await fetchWallets();
     await fetchTransactions();
-    SyncService.createTab(title);
-    _triggerSync(gtxId);
+    syncNow();
   }
 
   Future<void> depositToSavings(int savingsId, double amount, int walletId, DateTime date, String note) async {
@@ -1011,7 +1165,8 @@ class FinanceProvider with ChangeNotifier {
     if (amount > wallet.balance) throw Exception("Insufficient withdrawable balance");
 
     final db = await DatabaseHelper.instance.database;
-    int gtxId = 0;
+    final now = DateTime.now();
+
     await db.transaction((txn) async {
       final List<Map<String, dynamic>> savs = await txn.query('savings', where: 'id = ?', whereArgs: [savingsId]);
       if (savs.isEmpty) throw Exception("Savings goal not found");
@@ -1047,15 +1202,18 @@ class FinanceProvider with ChangeNotifier {
         type: TransactionType.savingsIncreased,
         walletId: walletId,
         categoryId: null,
+        syncStatus: 'pending',
+        updatedAt: now,
       );
-      gtxId = await txn.insert('transactions', gtx.toMap());
+      final gtxId = await txn.insert('transactions', gtx.toMap());
+      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
     });
 
     await fetchSavings();
     await fetchSavingsTransactions();
     await fetchWallets();
     await fetchTransactions();
-    _triggerSync(gtxId);
+    syncNow();
   }
 
   Future<void> withdrawFromSavings(int savingsId, double amount, int walletId, DateTime date, String note) async {
@@ -1063,17 +1221,18 @@ class FinanceProvider with ChangeNotifier {
     await _ensureWalletActive(walletId);
 
     final db = await DatabaseHelper.instance.database;
-    int gtxId = 0;
+    final now = DateTime.now();
+
     await db.transaction((txn) async {
       // Check allocation for this specific wallet and goal
       final List<Map<String, dynamic>> alloc = await txn.query('savings_allocations', where: 'savingsId = ? AND walletId = ?', whereArgs: [savingsId, walletId]);
       if (alloc.isEmpty) throw Exception("No savings allocation for this goal in selected wallet");
-      final double walletAllocation = (alloc.first['amount'] as num).toDouble();
-      if (amount > walletAllocation) throw Exception("Withdrawal amount exceeds wallet's frozen allocation for this goal");
+      final double currentAlloc = (alloc.first['amount'] as num).toDouble();
+      if (amount > currentAlloc) throw Exception("Withdrawal exceeds goal's allocated frozen balance for this wallet");
 
       final List<Map<String, dynamic>> savs = await txn.query('savings', where: 'id = ?', whereArgs: [savingsId]);
       if (savs.isEmpty) throw Exception("Savings goal not found");
-      final String title = savs.first['title'];
+      String title = savs.first['title'];
 
       await txn.execute('UPDATE savings SET amount = amount - ? WHERE id = ?', [amount, savingsId]);
 
@@ -1086,9 +1245,8 @@ class FinanceProvider with ChangeNotifier {
         note: note,
       );
       await txn.insert('savings_transactions', stx.toMap());
-      
+
       await txn.execute('UPDATE wallets SET balance = balance + ?, frozen_amount = frozen_amount - ? WHERE id = ?', [amount, amount, walletId]);
-      
       await txn.execute('UPDATE savings_allocations SET amount = amount - ? WHERE savingsId = ? AND walletId = ?', [amount, savingsId, walletId]);
 
       final gtx = TransactionModel(
@@ -1099,15 +1257,18 @@ class FinanceProvider with ChangeNotifier {
         type: TransactionType.savingsWithdrawal,
         walletId: walletId,
         categoryId: null,
+        syncStatus: 'pending',
+        updatedAt: now,
       );
-      gtxId = await txn.insert('transactions', gtx.toMap());
+      final gtxId = await txn.insert('transactions', gtx.toMap());
+      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
     });
 
     await fetchSavings();
     await fetchSavingsTransactions();
     await fetchWallets();
     await fetchTransactions();
-    _triggerSync(gtxId);
+    syncNow();
   }
 
   Future<void> deleteSavings(int id) async {
@@ -1125,8 +1286,7 @@ class FinanceProvider with ChangeNotifier {
       where: 'savingsId = ? AND amount > 0',
       whereArgs: [savingsId],
     );
-    
-    final walletIds = data.map((e) => e['walletId'] as int).toList();
+    final walletIds = data.map((e) => e['walletId'] as int).toSet();
     return _wallets.where((w) => walletIds.contains(w.id)).toList();
   }
 
@@ -1159,7 +1319,16 @@ class FinanceProvider with ChangeNotifier {
     await fetchTransactions();
 
     if (oldName.isNotEmpty && oldName != newName) {
-      await SyncService.updateCategoryName(oldName, newName);
+      await db.insert('sync_queue', {
+        'entity_type': 'loan',
+        'entity_id': id.toString(),
+        'action': 'update_category_name',
+        'payload': jsonEncode({'oldName': oldName, 'newName': newName}),
+        'created_at': DateTime.now().toIso8601String(),
+        'retry_count': 0,
+        'last_error': null,
+      });
+      syncNow();
     }
   }
 
@@ -1178,8 +1347,25 @@ class FinanceProvider with ChangeNotifier {
     await fetchTransactions();
 
     if (oldTitle.isNotEmpty && oldTitle != newTitle) {
-      await SyncService.renameTab(oldTitle, newTitle);
-      await SyncService.updateCategoryName(oldTitle, newTitle);
+      await db.insert('sync_queue', {
+        'entity_type': 'investment',
+        'entity_id': id.toString(),
+        'action': 'rename_tab',
+        'payload': jsonEncode({'oldTabName': oldTitle, 'newTabName': newTitle}),
+        'created_at': DateTime.now().toIso8601String(),
+        'retry_count': 0,
+        'last_error': null,
+      });
+      await db.insert('sync_queue', {
+        'entity_type': 'investment',
+        'entity_id': id.toString(),
+        'action': 'update_category_name',
+        'payload': jsonEncode({'oldName': oldTitle, 'newName': newTitle}),
+        'created_at': DateTime.now().toIso8601String(),
+        'retry_count': 0,
+        'last_error': null,
+      });
+      syncNow();
     }
   }
 
@@ -1198,16 +1384,40 @@ class FinanceProvider with ChangeNotifier {
     await fetchTransactions();
 
     if (oldTitle.isNotEmpty && oldTitle != newTitle) {
-      await SyncService.renameTab(oldTitle, newTitle);
-      await SyncService.updateCategoryName(oldTitle, newTitle);
+      await db.insert('sync_queue', {
+        'entity_type': 'savings',
+        'entity_id': id.toString(),
+        'action': 'rename_tab',
+        'payload': jsonEncode({'oldTabName': oldTitle, 'newTabName': newTitle}),
+        'created_at': DateTime.now().toIso8601String(),
+        'retry_count': 0,
+        'last_error': null,
+      });
+      await db.insert('sync_queue', {
+        'entity_type': 'savings',
+        'entity_id': id.toString(),
+        'action': 'update_category_name',
+        'payload': jsonEncode({'oldName': oldTitle, 'newName': newTitle}),
+        'created_at': DateTime.now().toIso8601String(),
+        'retry_count': 0,
+        'last_error': null,
+      });
+      syncNow();
     }
   }
 
   // --- Financial Summaries (Rules Based) ---
-  
   double get totalWalletAssets {
     // Rule: Wallet Asset = Withdrawable + Frozen
     return _wallets.fold(0, (sum, w) => sum + w.balance + w.frozenAmount);
+  }
+
+  double get totalCashBalance {
+    return _wallets.fold(0, (sum, w) => sum + w.balance);
+  }
+
+  double get totalFrozenBalance {
+    return _wallets.fold(0, (sum, w) => sum + w.frozenAmount);
   }
 
   double get totalLoanReceivable {
@@ -1229,6 +1439,10 @@ class FinanceProvider with ChangeNotifier {
     return _investments.fold(0, (sum, i) => sum + i.amount);
   }
 
+  double get totalInvestmentBalance {
+    return totalInvestments;
+  }
+
   double get totalAssets {
     return totalWalletAssets + totalLoanReceivable + totalInvestments;
   }
@@ -1240,6 +1454,16 @@ class FinanceProvider with ChangeNotifier {
   double get netWorth {
     // Rule: Net Worth = Total Assets - Total Liabilities
     return totalAssets - totalLiabilities;
+  }
+
+  double get totalNetWorth => netWorth;
+
+  double get totalGivenLoans => totalLoanReceivable;
+
+  double get totalTakenLoans => totalLoanPayable;
+
+  double get totalSavingsBalance {
+    return _savings.fold(0, (sum, s) => sum + s.amount);
   }
 
   // --- Reporting Methods ---
@@ -1295,90 +1519,153 @@ class FinanceProvider with ChangeNotifier {
         .fold(0, (sum, tx) => sum + tx.amount);
   }
 
+  // --- Reset & Sync Logic ---
   Future<void> resetApp() async {
-    // 1. Clear Google Sheet Data
     await SyncService.resetSheet();
-    
-    // 2. Clear Local Database
     await DatabaseHelper.instance.resetDatabase();
-    
-    // 3. Refresh Provider State
     await fetchAll();
 
-    // 4. Sync Default Wallet to Sheet
     if (_wallets.isNotEmpty) {
       final defaultWallet = _wallets.firstWhere((w) => w.isDefault, orElse: () => _wallets.first);
       _triggerWalletSync(defaultWallet);
     }
   }
 
-  Future<void> syncFromSheet() async {
-    final data = await SyncService.fetchFromSheet();
-    if (data.isEmpty) return;
+  // Public sync entry point called by UI buttons and automatic triggers
+  Future<void> syncFromSheet() => syncNow();
+
+  Future<void> syncNow() async {
+    if (_isSyncing) {
+      _syncRequestedAgain = true;
+      return;
+    }
+    _isSyncing = true;
+    _syncStatusMessage = "Syncing...";
+    notifyListeners();
+
+    try {
+      // 1. Reconcile external changes from Google Sheets into local SQLite
+      await _reconcileFromSheet();
+
+      // 2. Push all pending local changes to Google Sheets
+      await _pushPendingQueue();
+
+      _lastSyncTime = DateTime.now();
+      _syncStatusMessage = "Synced";
+    } catch (e) {
+      debugPrint("Sync Error: $e");
+      _syncStatusMessage = "Offline / Sync Error";
+    } finally {
+      _isSyncing = false;
+      notifyListeners();
+      if (_syncRequestedAgain) {
+        _syncRequestedAgain = false;
+        syncNow();
+      }
+    }
+  }
+
+  Future<void> _reconcileFromSheet() async {
+    final List<dynamic> remoteData = await SyncService.fetchFromSheet();
+    if (remoteData.isEmpty) {
+      // Offline or empty sheet
+      return;
+    }
 
     final db = await DatabaseHelper.instance.database;
     await db.transaction((txn) async {
-      for (var row in data) {
-        // 1. Get or Create Wallet ID (Skip non-wallet identifiers)
-        String walletName = row['walletName']?.toString() ?? 'Default';
+      // Load all current local transactions
+      final localTxRows = await txn.query('transactions');
+      final Map<String, Map<String, dynamic>> localMapBySyncId = {};
+      for (var row in localTxRows) {
+        final sId = row['sync_id']?.toString() ?? row['id']?.toString() ?? '';
+        if (sId.isNotEmpty) {
+          localMapBySyncId[sId] = row;
+        }
+      }
+
+      final Set<String> remoteSyncIds = {};
+
+      for (var item in remoteData) {
+        if (item is! Map) continue;
+        final row = Map<String, dynamic>.from(item);
+
+        final remoteId = row['id']?.toString().trim() ?? '';
+        if (remoteId.isEmpty) continue;
+        remoteSyncIds.add(remoteId);
+
+        final rawAmount = double.tryParse(row['amount']?.toString() ?? '0') ?? 0.0;
+        final rawDate = _parseSheetDate(row['date']?.toString());
+        final rawNote = row['note']?.toString() ?? '';
+        final rawTitleCategory = row['titleCategory']?.toString() ?? 'General';
+        final typeLabel = row['transectionType']?.toString() ?? 'Expense';
+        final type = _getTypeFromLabel(typeLabel);
+        final rawWalletName = row['walletName']?.toString() ?? 'Main Wallet';
+        final remoteUpdatedAt = row['updatedAt'] != null ? DateTime.tryParse(row['updatedAt'].toString()) : null;
+
+        // Parse wallet and transfer destination
         int walletId = 0;
-        if (walletName != 'N/A' && walletName != 'Investment Principal' && walletName != 'None' && walletName.isNotEmpty) {
-          walletId = await _getOrCreateWalletIdInTx(txn, walletName);
+        int? toWalletId;
+
+        if (type == TransactionType.transfer && rawTitleCategory.isNotEmpty) {
+          if (rawTitleCategory.startsWith('To ')) {
+            // "To TargetWallet" -> source is rawWalletName, destination is TargetWallet
+            walletId = await _getOrCreateWalletIdInTx(txn, rawWalletName);
+            final targetName = rawTitleCategory.substring(3).trim();
+            if (targetName.isNotEmpty && targetName != rawWalletName) {
+              toWalletId = await _getOrCreateWalletIdInTx(txn, targetName);
+            }
+          } else if (rawTitleCategory.startsWith('From ')) {
+            // "From SourceWallet" -> source is SourceWallet, destination is rawWalletName
+            final sourceName = rawTitleCategory.substring(5).trim();
+            if (sourceName.isNotEmpty && sourceName != rawWalletName) {
+              walletId = await _getOrCreateWalletIdInTx(txn, sourceName);
+            }
+            toWalletId = await _getOrCreateWalletIdInTx(txn, rawWalletName);
+          } else {
+            walletId = await _getOrCreateWalletIdInTx(txn, rawWalletName);
+          }
+        } else {
+          // Regular transactions
+          if (rawWalletName != 'N/A' && rawWalletName != 'Investment Principal' && rawWalletName != 'None' && rawWalletName != 'Loans' && rawWalletName.isNotEmpty) {
+            walletId = await _getOrCreateWalletIdInTx(txn, rawWalletName);
+          } else if (_isLoanTx(type) || type == TransactionType.income || type == TransactionType.expense) {
+            // Assign to default wallet if sheet name was "Loans" or N/A
+            walletId = await _getDefaultWalletIdInTx(txn);
+          }
         }
 
-        // 2. Map Label back to Type
-        String typeLabel = row['transectionType']?.toString() ?? 'Expense';
-        TransactionType type = _getTypeFromLabel(typeLabel);
-        
-        // 2b. Extract titleCategory early (needed for transfer parsing)
-        String titleCategory = row['titleCategory']?.toString() ?? 'General';
-        
-        // 2c. Parse toWalletId for transfers from titleCategory ("To WalletName" / "From WalletName")
-        int? toWalletId;
-        if (type == TransactionType.transfer && titleCategory.isNotEmpty) {
-          String? otherWalletName;
-          if (titleCategory.startsWith('To ')) {
-            otherWalletName = titleCategory.substring(3);
-          } else if (titleCategory.startsWith('From ')) {
-            otherWalletName = titleCategory.substring(5);
-          }
-          
-          if (otherWalletName != null && otherWalletName.isNotEmpty && otherWalletName != walletName) {
-            toWalletId = await _getOrCreateWalletIdInTx(txn, otherWalletName);
-          }
-        }
-        
-        // 3. Category & Entity handling
+        // Category & Entity handling
         int? categoryId;
         if (type == TransactionType.income || type == TransactionType.expense) {
-          categoryId = await _getOrCreateCategoryIdInTx(txn, titleCategory, type);
-        } else if (titleCategory.isNotEmpty && titleCategory != 'General') {
+          categoryId = await _getOrCreateCategoryIdInTx(txn, rawTitleCategory, type);
+        } else if (rawTitleCategory.isNotEmpty && rawTitleCategory != 'General') {
           if (_isInvestmentTx(type)) {
-            final exists = (await txn.query('investments', where: 'title = ?', whereArgs: [titleCategory])).isNotEmpty;
+            final exists = (await txn.query('investments', where: 'title = ?', whereArgs: [rawTitleCategory])).isNotEmpty;
             if (!exists) {
               await txn.insert('investments', {
-                'title': titleCategory,
+                'title': rawTitleCategory,
                 'amount': 0.0,
-                'date': _parseSheetDate(row['date']?.toString()),
+                'date': rawDate,
                 'note': 'Synced from Sheet',
               });
             }
           } else if (_isSavingsTx(type)) {
-            final exists = (await txn.query('savings', where: 'title = ?', whereArgs: [titleCategory])).isNotEmpty;
+            final exists = (await txn.query('savings', where: 'title = ?', whereArgs: [rawTitleCategory])).isNotEmpty;
             if (!exists) {
               await txn.insert('savings', {
-                'title': titleCategory,
+                'title': rawTitleCategory,
                 'amount': 0.0,
-                'date': _parseSheetDate(row['date']?.toString()),
+                'date': rawDate,
                 'note': 'Synced from Sheet',
               });
             }
           } else if (_isLoanTx(type)) {
             bool isDebt = type == TransactionType.loanTaken || type == TransactionType.loanTakenMore || type == TransactionType.loanRepaid;
-            final exists = (await txn.query('loan_recipients', where: 'name = ? AND isDebt = ?', whereArgs: [titleCategory, isDebt ? 1 : 0])).isNotEmpty;
+            final exists = (await txn.query('loan_recipients', where: 'name = ? AND isDebt = ?', whereArgs: [rawTitleCategory, isDebt ? 1 : 0])).isNotEmpty;
             if (!exists) {
               await txn.insert('loan_recipients', {
-                'name': titleCategory,
+                'name': rawTitleCategory,
                 'totalAmount': 0.0,
                 'isDebt': isDebt ? 1 : 0,
               });
@@ -1386,26 +1673,274 @@ class FinanceProvider with ChangeNotifier {
           }
         }
 
-        // 4. Map Transaction
-        final txMap = {
-          'id': int.tryParse(row['id'].toString()),
-          'title': titleCategory,
-          'amount': double.tryParse(row['amount'].toString()) ?? 0.0,
-          'date': _parseSheetDate(row['date']?.toString()),
-          'note': row['note']?.toString() ?? '',
-          'type': type.name,
-          'walletId': walletId,
-          'toWalletId': toWalletId,
-          'categoryId': categoryId,
-        };
-        
-        if (txMap['id'] != null) {
-          await txn.insert('transactions', txMap, conflictAlgorithm: ConflictAlgorithm.replace);
+        final localTx = localMapBySyncId[remoteId];
+
+        if (localTx == null) {
+          // 1. Transaction added directly in Google Sheets while app was offline
+          await txn.insert('transactions', {
+            'sync_id': remoteId,
+            'title': rawTitleCategory,
+            'amount': rawAmount,
+            'date': rawDate,
+            'note': rawNote,
+            'type': type.name,
+            'walletId': walletId,
+            'toWalletId': toWalletId,
+            'categoryId': categoryId,
+            'sync_status': 'synced',
+            'updated_at': remoteUpdatedAt?.toIso8601String() ?? rawDate,
+          });
+        } else {
+          // 2. Transaction exists on both sides
+          final localSyncStatus = localTx['sync_status']?.toString() ?? 'synced';
+
+          if (localSyncStatus == 'synced') {
+            // Local record has no pending offline changes: apply remote Sheet edit
+            await txn.update(
+              'transactions',
+              {
+                'title': rawTitleCategory,
+                'amount': rawAmount,
+                'date': rawDate,
+                'note': rawNote,
+                'type': type.name,
+                'walletId': walletId,
+                'toWalletId': toWalletId,
+                'categoryId': categoryId,
+                'sync_status': 'synced',
+                'updated_at': remoteUpdatedAt?.toIso8601String() ?? rawDate,
+              },
+              where: 'id = ?',
+              whereArgs: [localTx['id']],
+            );
+          } else if (localSyncStatus == 'pending') {
+            // CONFLICT: Modified independently in app AND Google Sheets!
+            final localAmount = (localTx['amount'] as num).toDouble();
+            final localNote = localTx['note']?.toString() ?? '';
+            final localUpdatedAt = localTx['updated_at'] != null ? DateTime.tryParse(localTx['updated_at'].toString()) : null;
+
+            if (localAmount != rawAmount || localNote != rawNote) {
+              if (remoteUpdatedAt != null && localUpdatedAt != null && remoteUpdatedAt.isAfter(localUpdatedAt)) {
+                // Remote edit is newer
+                await txn.update(
+                  'transactions',
+                  {
+                    'title': rawTitleCategory,
+                    'amount': rawAmount,
+                    'date': rawDate,
+                    'note': rawNote,
+                    'type': type.name,
+                    'walletId': walletId,
+                    'toWalletId': toWalletId,
+                    'categoryId': categoryId,
+                    'sync_status': 'synced',
+                    'updated_at': remoteUpdatedAt.toIso8601String(),
+                  },
+                  where: 'id = ?',
+                  whereArgs: [localTx['id']],
+                );
+              } else {
+                // Local is pending and newer (or remote was manual sheet edit without timestamp):
+                // Keep local change, but preserve remote Sheet amount in note to prevent silent loss
+                String mergedNote = localNote;
+                if (!mergedNote.contains('[Conflict: Sheet had')) {
+                  mergedNote = mergedNote.isEmpty
+                      ? '[Conflict: Sheet had $rawAmount]'
+                      : '$mergedNote [Conflict: Sheet had $rawAmount]';
+                }
+                await txn.update(
+                  'transactions',
+                  {'note': mergedNote},
+                  where: 'id = ?',
+                  whereArgs: [localTx['id']],
+                );
+              }
+            }
+          }
         }
       }
+
+      // Check for intentional deletions in Google Sheets:
+      // If a transaction was synced and is no longer present in Google Sheets:
+      for (var entry in localMapBySyncId.entries) {
+        final sId = entry.key;
+        final localRow = entry.value;
+        final status = localRow['sync_status']?.toString() ?? 'synced';
+        if (status == 'synced' && !remoteSyncIds.contains(sId)) {
+          // Safely delete locally since user deleted it in Google Sheets
+          await txn.delete('transactions', where: 'id = ?', whereArgs: [localRow['id']]);
+        }
+      }
+
+      // Recalculate wallet balances within the same atomic transaction
       await _recalculateWalletBalancesInTx(txn);
     });
+
     await fetchAll();
+  }
+
+  Future<void> _pushPendingQueue() async {
+    final queueItems = await DatabaseHelper.instance.getSyncQueue();
+    if (queueItems.isEmpty) return;
+
+    final List<Map<String, dynamic>> batchOps = [];
+    for (var item in queueItems) {
+      try {
+        final payload = jsonDecode(item['payload'] as String);
+        batchOps.add({
+          "action": item['action'],
+          "payload": payload,
+        });
+      } catch (_) {}
+    }
+
+    bool batchSuccess = false;
+    if (batchOps.isNotEmpty) {
+      final batchResult = await SyncService.batchSync(batchOps);
+      if (batchResult['success'] == true) {
+        batchSuccess = true;
+      }
+    }
+
+    final db = await DatabaseHelper.instance.database;
+
+    if (batchSuccess) {
+      for (var item in queueItems) {
+        final itemId = item['id'] as int;
+        final entityId = item['entity_id'] as String;
+        final action = item['action'] as String;
+
+        await DatabaseHelper.instance.deleteSyncQueueItem(itemId);
+        if (action != 'delete') {
+          await db.update('transactions', {'sync_status': 'synced'}, where: 'sync_id = ?', whereArgs: [entityId]);
+        }
+      }
+    } else {
+      // Fallback for legacy Apps Script deployments: process queue items individually
+      for (var item in queueItems) {
+        final itemId = item['id'] as int;
+        final entityType = item['entity_type'] as String;
+        final entityId = item['entity_id'] as String;
+        final action = item['action'] as String;
+        bool itemSuccess = false;
+
+        try {
+          final payload = jsonDecode(item['payload'] as String);
+
+          if (entityType == 'transaction') {
+            if (action == 'delete') {
+              itemSuccess = await SyncService.deleteTransaction(entityId);
+            } else {
+              itemSuccess = await SyncService.syncTransaction(
+                TransactionModel(
+                  syncId: payload['id']?.toString(),
+                  title: payload['titleCategory']?.toString() ?? '',
+                  amount: double.tryParse(payload['amount']?.toString() ?? '0') ?? 0.0,
+                  date: _parseSheetDateToDateTime(payload['date']?.toString()),
+                  note: payload['note']?.toString() ?? '',
+                  type: _getTypeFromLabel(payload['transectionType']?.toString() ?? 'Expense'),
+                  walletId: 0,
+                  updatedAt: payload['updatedAt'] != null ? DateTime.tryParse(payload['updatedAt'].toString()) : null,
+                ),
+                payload['walletName']?.toString() ?? 'Main Wallet',
+                payload['titleCategory']?.toString() ?? '',
+                payload['transectionType']?.toString() ?? 'Expense',
+                secondaryTabName: payload['secondaryTabName']?.toString(),
+                action: 'create',
+              );
+            }
+          } else if (action == 'create_tab') {
+            itemSuccess = await SyncService.createTab(payload['tabName']?.toString() ?? '');
+          } else if (action == 'rename_tab') {
+            itemSuccess = await SyncService.renameTab(payload['oldTabName']?.toString() ?? '', payload['newTabName']?.toString() ?? '');
+          } else if (action == 'update_wallet_name') {
+            itemSuccess = await SyncService.updateWalletName(payload['oldName']?.toString() ?? '', payload['newName']?.toString() ?? '');
+          } else if (action == 'update_category_name') {
+            itemSuccess = await SyncService.updateCategoryName(payload['oldName']?.toString() ?? '', payload['newName']?.toString() ?? '');
+          }
+
+          if (itemSuccess) {
+            await DatabaseHelper.instance.deleteSyncQueueItem(itemId);
+            if (entityType == 'transaction' && action != 'delete') {
+              await db.update('transactions', {'sync_status': 'synced'}, where: 'sync_id = ?', whereArgs: [entityId]);
+            }
+          } else {
+            await DatabaseHelper.instance.updateSyncQueueRetry(itemId, 'Offline or failed');
+          }
+        } catch (err) {
+          await DatabaseHelper.instance.updateSyncQueueRetry(itemId, err.toString());
+        }
+      }
+    }
+  }
+
+  Future<void> _enqueueTxSyncInTx(Transaction txn, TransactionModel tx, String action) async {
+    final payload = _buildTxSyncPayload(tx);
+    await txn.insert('sync_queue', {
+      'entity_type': 'transaction',
+      'entity_id': tx.syncId,
+      'action': action,
+      'payload': jsonEncode(payload),
+      'created_at': DateTime.now().toIso8601String(),
+      'retry_count': 0,
+      'last_error': null,
+    });
+  }
+
+  Map<String, dynamic> _buildTxSyncPayload(TransactionModel tx) {
+    if (tx.type == TransactionType.transfer && tx.toWalletId != null) {
+      final fromWallet = _wallets.firstWhere((w) => w.id == tx.walletId, orElse: () => _wallets.first);
+      final toWallet = _wallets.firstWhere((w) => w.id == tx.toWalletId, orElse: () => _wallets.first);
+      return {
+        "id": tx.syncId,
+        "date": "${tx.date.day.toString().padLeft(2, '0')}-${tx.date.month.toString().padLeft(2, '0')}-${tx.date.year.toString().substring(2)}",
+        "titleCategory": "To ${toWallet.name}",
+        "transectionType": _getTransectionTypeLabel(tx.type),
+        "amount": tx.amount,
+        "note": tx.note,
+        "walletName": fromWallet.name,
+        "secondaryTabName": toWallet.name,
+        "updatedAt": (tx.updatedAt ?? DateTime.now()).toIso8601String(),
+      };
+    } else {
+      String walletName = "N/A";
+      if (tx.walletId != 0 && _wallets.isNotEmpty) {
+        final wallet = _wallets.firstWhere((w) => w.id == tx.walletId, orElse: () => _wallets.first);
+        walletName = wallet.name;
+      }
+
+      String titleCategory = "";
+      String? secondaryTabName;
+
+      if (tx.categoryId != null && _categories.isNotEmpty) {
+        titleCategory = _categories.firstWhere(
+          (c) => c.id == tx.categoryId,
+          orElse: () => Category(name: 'General', iconCode: 0, type: CategoryType.expense),
+        ).name;
+      } else {
+        titleCategory = _extractName(tx.title);
+        if (_isInvestmentTx(tx.type)) {
+          secondaryTabName = titleCategory;
+          if (tx.walletId == 0) walletName = "N/A";
+        } else if (_isSavingsTx(tx.type)) {
+          secondaryTabName = titleCategory;
+        } else if (_isLoanTx(tx.type)) {
+          secondaryTabName = "Loans";
+        }
+      }
+
+      return {
+        "id": tx.syncId,
+        "date": "${tx.date.day.toString().padLeft(2, '0')}-${tx.date.month.toString().padLeft(2, '0')}-${tx.date.year.toString().substring(2)}",
+        "titleCategory": titleCategory,
+        "transectionType": _getTransectionTypeLabel(tx.type),
+        "amount": tx.amount,
+        "note": tx.note,
+        "walletName": walletName,
+        ...? (secondaryTabName != null ? {"secondaryTabName": secondaryTabName} : null),
+        "updatedAt": (tx.updatedAt ?? DateTime.now()).toIso8601String(),
+      };
+    }
   }
 
   Future<void> _recalculateWalletBalancesInTx(Transaction txn) async {
@@ -1538,71 +2073,19 @@ class FinanceProvider with ChangeNotifier {
     });
   }
 
-  void _triggerSync(int txId) {
-    try {
-      final savedTx = _transactions.firstWhere((t) => t.id == txId);
-      
-      if (savedTx.type == TransactionType.transfer && savedTx.toWalletId != null) {
-        final fromWallet = _wallets.firstWhere((w) => w.id == savedTx.walletId);
-        final toWallet = _wallets.firstWhere((w) => w.id == savedTx.toWalletId);
-        
-        // 1. Sync for Source Wallet (Outgoing)
-        SyncService.syncTransaction(
-          savedTx, 
-          fromWallet.name, 
-          "To ${toWallet.name}", 
-          _getTransectionTypeLabel(savedTx.type)
-        );
-        
-        // 2. Sync for Target Wallet (Incoming)
-        SyncService.syncTransaction(
-          savedTx, 
-          toWallet.name, 
-          "From ${fromWallet.name}", 
-          _getTransectionTypeLabel(savedTx.type)
-        );
-      } else {
-        String walletName = "N/A";
-        if (savedTx.walletId != 0) {
-          final wallet = _wallets.firstWhere((w) => w.id == savedTx.walletId, orElse: () => _wallets.first);
-          walletName = wallet.name;
-        }
-
-        String titleCategory = "";
-        String? secondaryTabName;
-        
-        if (savedTx.categoryId != null) {
-          titleCategory = _categories.firstWhere(
-            (c) => c.id == savedTx.categoryId, 
-            orElse: () => Category(name: 'General', iconCode: 0, type: CategoryType.expense)
-          ).name;
-        } else {
-          titleCategory = _extractName(savedTx.title);
-
-          if (_isInvestmentTx(savedTx.type)) {
-            secondaryTabName = titleCategory;
-            if (savedTx.walletId == 0) {
-              // Direct Principal Adjustment - no wallet involved
-              walletName = "N/A";
-            }
-          } else if (_isSavingsTx(savedTx.type)) {
-            secondaryTabName = titleCategory;
-          } else if (_isLoanTx(savedTx.type)) {
-            secondaryTabName = "Loans";
-          }
-        }
-
-        SyncService.syncTransaction(
-          savedTx, 
-          walletName, 
-          titleCategory, 
-          _getTransectionTypeLabel(savedTx.type),
-          secondaryTabName: secondaryTabName,
-        );
-      }
-    } catch (e) {
-      print("Sync trigger error: $e");
-    }
+  Future<int> _getDefaultWalletIdInTx(Transaction txn) async {
+    final res = await txn.query('wallets', where: 'isDefault = 1', limit: 1);
+    if (res.isNotEmpty) return res.first['id'] as int;
+    final all = await txn.query('wallets', limit: 1);
+    if (all.isNotEmpty) return all.first['id'] as int;
+    return await txn.insert('wallets', {
+      'name': 'Main Wallet',
+      'balance': 0.0,
+      'frozen_amount': 0.0,
+      'color': 0xFF7F3DFF,
+      'isDefault': 1,
+      'is_archived': 0,
+    });
   }
 
   bool _isInvestmentTx(TransactionType type) {
@@ -1663,7 +2146,6 @@ class FinanceProvider with ChangeNotifier {
     try {
       String s = raw.trim();
       
-      // Handle ISO strings with Z / T by parsing to LOCAL time first
       if (s.contains('T') || s.endsWith('Z')) {
         final localDt = DateTime.parse(s).toLocal();
         return DateTime(localDt.year, localDt.month, localDt.day, 12, 0, 0).toIso8601String();
@@ -1674,13 +2156,11 @@ class FinanceProvider with ChangeNotifier {
         final parts = s.split(separator);
         if (parts.length == 3) {
           if (parts[0].length == 4) {
-            // YYYY-MM-DD
             int year = int.parse(parts[0]);
             int month = int.parse(parts[1]);
             int day = int.parse(parts[2].replaceAll(RegExp(r'\D'), ''));
             return DateTime(year, month, day, 12, 0, 0).toIso8601String();
           } else {
-            // DD-MM-YY or MM-DD-YY
             int p0 = int.parse(parts[0].replaceAll(RegExp(r'\D'), ''));
             int p1 = int.parse(parts[1].replaceAll(RegExp(r'\D'), ''));
             int year = int.parse(parts[2].replaceAll(RegExp(r'\D'), ''));
@@ -1688,11 +2168,9 @@ class FinanceProvider with ChangeNotifier {
 
             int day, month;
             if (p1 > 12) {
-              // MM-DD-YY (e.g. 01-31-26)
               month = p0;
               day = p1;
             } else {
-              // DD-MM-YY (e.g. 31-01-26)
               day = p0;
               month = p1;
             }
@@ -1705,5 +2183,9 @@ class FinanceProvider with ChangeNotifier {
     } catch (_) {
       return DateTime.now().toIso8601String();
     }
+  }
+
+  DateTime _parseSheetDateToDateTime(String? raw) {
+    return DateTime.parse(_parseSheetDate(raw));
   }
 }

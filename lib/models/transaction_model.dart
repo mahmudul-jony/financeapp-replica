@@ -1,3 +1,5 @@
+import 'dart:math';
+
 enum TransactionType {
   income,
   expense,
@@ -21,7 +23,8 @@ enum TransactionType {
 
 class TransactionModel {
   final int? id;
-  final String title; // Added title
+  final String syncId;
+  final String title;
   final double amount;
   final DateTime date;
   final String note;
@@ -29,9 +32,12 @@ class TransactionModel {
   final int walletId;
   final int? toWalletId;
   final int? categoryId;
+  final String syncStatus; // 'synced', 'pending', 'pending_delete'
+  final DateTime? updatedAt;
 
   TransactionModel({
     this.id,
+    String? syncId,
     required this.title,
     required this.amount,
     required this.date,
@@ -40,7 +46,47 @@ class TransactionModel {
     required this.walletId,
     this.toWalletId,
     this.categoryId,
-  });
+    this.syncStatus = 'synced',
+    this.updatedAt,
+  }) : syncId = (syncId != null && syncId.trim().isNotEmpty)
+            ? syncId.trim()
+            : (id != null ? id.toString() : _generateSyncId());
+
+  static String _generateSyncId() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final rand = Random().nextInt(1000000).toString().padLeft(6, '0');
+    return 'tx_${now}_$rand';
+  }
+
+  TransactionModel copyWith({
+    int? id,
+    String? syncId,
+    String? title,
+    double? amount,
+    DateTime? date,
+    String? note,
+    TransactionType? type,
+    int? walletId,
+    int? toWalletId,
+    int? categoryId,
+    String? syncStatus,
+    DateTime? updatedAt,
+  }) {
+    return TransactionModel(
+      id: id ?? this.id,
+      syncId: syncId ?? this.syncId,
+      title: title ?? this.title,
+      amount: amount ?? this.amount,
+      date: date ?? this.date,
+      note: note ?? this.note,
+      type: type ?? this.type,
+      walletId: walletId ?? this.walletId,
+      toWalletId: toWalletId ?? this.toWalletId,
+      categoryId: categoryId ?? this.categoryId,
+      syncStatus: syncStatus ?? this.syncStatus,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
 
   String get displayLabel {
     switch (type) {
@@ -96,6 +142,7 @@ class TransactionModel {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
+      'sync_id': syncId,
       'title': title,
       'amount': amount,
       'date': "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}",
@@ -104,12 +151,15 @@ class TransactionModel {
       'walletId': walletId,
       'toWalletId': toWalletId,
       'categoryId': categoryId,
+      'sync_status': syncStatus,
+      'updated_at': (updatedAt ?? DateTime.now()).toIso8601String(),
     };
   }
 
   factory TransactionModel.fromMap(Map<String, dynamic> map) {
     return TransactionModel(
       id: map['id'],
+      syncId: map['sync_id']?.toString() ?? (map['id']?.toString() ?? ''),
       title: map['title'] ?? '',
       amount: (map['amount'] as num).toDouble(),
       date: DateTime.parse(map['date']),
@@ -118,6 +168,8 @@ class TransactionModel {
       walletId: map['walletId'],
       toWalletId: map['toWalletId'],
       categoryId: map['categoryId'],
+      syncStatus: map['sync_status'] ?? 'synced',
+      updatedAt: map['updated_at'] != null ? DateTime.tryParse(map['updated_at'].toString()) : null,
     );
   }
 }
