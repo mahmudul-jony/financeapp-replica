@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 import 'package:financeapp/providers/finance_provider.dart';
 import 'package:financeapp/providers/update_provider.dart';
 
+final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(
@@ -26,6 +28,7 @@ class BankingDashboardApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Mobile Banking Dashboard',
+      navigatorObservers: [routeObserver],
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(

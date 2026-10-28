@@ -19,6 +19,8 @@ function doGet(e) {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheets = ss.getSheets();
     var idMap = {};
+    var warnings = [];
+    var sameTabSeen = {};
     var tz = ss.getSpreadsheetTimeZone();
 
     // Pass 1: Find the maximum txid number across all sheets
@@ -67,6 +69,14 @@ function doGet(e) {
             row[0] = id;
           }
 
+          // Duplicate validation: check for duplicate ID within the same tab
+          var sameTabKey = sheetName + "::" + id;
+          if (sameTabSeen[sameTabKey]) {
+            warnings.push("Duplicate ID '" + id + "' found multiple times within tab '" + sheetName + "' at row " + (j + 1));
+          } else {
+            sameTabSeen[sameTabKey] = true;
+          }
+
           var rawDate = row[1];
           var dateStr = "";
           if (rawDate instanceof Date) {
@@ -95,6 +105,13 @@ function doGet(e) {
           // Deduplication across multiple projection sheets:
           if (idMap[id]) {
             var existing = idMap[id];
+
+            // Validate cross-tab data compatibility
+            var amountDiff = Math.abs(parseFloat(amount || 0) - parseFloat(existing.amount || 0));
+            if (amountDiff > 0.01) {
+              warnings.push("Incompatible amount for ID '" + id + "' between tab '" + existing.sheetName + "' (" + existing.amount + ") and tab '" + sheetName + "' (" + amount + ")");
+            }
+
             // Prefer the "To " entry for transfers because it preserves source wallet
             if (titleCategory.indexOf("To ") === 0) {
               idMap[id] = record;
@@ -118,10 +135,19 @@ function doGet(e) {
       }
     }
 
-    return ContentService.createTextOutput(JSON.stringify(allData)).setMimeType(ContentService.MimeType.JSON);
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "success",
+      data: allData,
+      warnings: warnings
+    })).setMimeType(ContentService.MimeType.JSON);
   } catch (error) {
     console.error("doGet error: " + error);
-    return ContentService.createTextOutput(JSON.stringify([])).setMimeType(ContentService.MimeType.JSON);
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "error",
+      message: error.toString(),
+      data: [],
+      warnings: []
+    })).setMimeType(ContentService.MimeType.JSON);
   }
 }
 
@@ -143,36 +169,47 @@ function doPost(e) {
     if (action === "batch_sync") {
       var operations = contents.operations || [];
       var processedIds = [];
+      var failedOps = [];
 
       for (var b = 0; b < operations.length; b++) {
         var op = operations[b];
         var opAction = op.action;
-        var opPayload = op.payload;
+        var opPayload = op.payload || {};
 
-        if (opAction === "delete") {
-          deleteTransactionRows(ss, opPayload.id);
-          processedIds.push(opPayload.id);
-        } else if (opAction === "create" || opAction === "upsert" || opAction === "update") {
-          upsertTransaction(ss, opPayload);
-          processedIds.push(opPayload.id);
-        } else if (opAction === "create_tab") {
-          if (opPayload.tabName && !ss.getSheetByName(opPayload.tabName)) {
-            createSheetWithHeaders(ss, opPayload.tabName);
+        try {
+          if (opAction === "delete") {
+            deleteTransactionRows(ss, opPayload.id);
+            if (opPayload.id) processedIds.push(opPayload.id);
+          } else if (opAction === "create" || opAction === "upsert" || opAction === "update") {
+            upsertTransaction(ss, opPayload);
+            if (opPayload.id) processedIds.push(opPayload.id);
+          } else if (opAction === "create_tab") {
+            if (opPayload.tabName && !ss.getSheetByName(opPayload.tabName)) {
+              createSheetWithHeaders(ss, opPayload.tabName);
+            }
+            if (opPayload.tabName) processedIds.push("tab_" + opPayload.tabName);
+          } else if (opAction === "rename_tab") {
+            renameTabInternal(ss, opPayload.oldTabName, opPayload.newTabName);
+            if (opPayload.oldTabName) processedIds.push("rename_" + opPayload.oldTabName);
+          } else if (opAction === "update_wallet_name") {
+            updateWalletNameInternal(ss, opPayload.oldName, opPayload.newName);
+            if (opPayload.oldName) processedIds.push("wallet_" + opPayload.oldName);
+          } else if (opAction === "update_category_name") {
+            updateCategoryNameInternal(ss, opPayload.oldName, opPayload.newName);
+            if (opPayload.oldName) processedIds.push("cat_" + opPayload.oldName);
           }
-        } else if (opAction === "rename_tab") {
-          renameTabInternal(ss, opPayload.oldTabName, opPayload.newTabName);
-        } else if (opAction === "update_wallet_name") {
-          updateWalletNameInternal(ss, opPayload.oldName, opPayload.newName);
-        } else if (opAction === "update_category_name") {
-          updateCategoryNameInternal(ss, opPayload.oldName, opPayload.newName);
+        } catch (opErr) {
+          console.error("Batch op failed at index " + b + ": " + opErr);
+          failedOps.push({ action: opAction, id: opPayload.id, error: opErr.toString() });
         }
       }
 
       return jsonResponse({
-        status: "success",
+        status: failedOps.length === 0 ? "success" : (processedIds.length > 0 ? "partial" : "error"),
         action: "batch_sync",
         processedCount: processedIds.length,
-        processedIds: processedIds
+        processedIds: processedIds,
+        failedOps: failedOps
       });
     }
 

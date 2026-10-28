@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 import '../database/db_helper.dart';
@@ -29,11 +30,17 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   bool _syncRequestedAgain = false;
   String? _syncStatusMessage;
   DateTime? _lastSyncTime;
-  Timer? _periodicSyncTimer;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  bool _wasOffline = false;
+  final List<String> _syncWarnings = [];
+  final List<Map<String, dynamic>> _conflicts = [];
 
   bool get isSyncing => _isSyncing;
   String? get syncStatusMessage => _syncStatusMessage;
   DateTime? get lastSyncTime => _lastSyncTime;
+  List<String> get syncWarnings => List.unmodifiable(_syncWarnings);
+  List<Map<String, dynamic>> get conflicts => List.unmodifiable(_conflicts);
+  bool get hasConflicts => _conflicts.isNotEmpty;
 
   // Filter & Preferences State
   FilterType _currentFilter = FilterType.month;
@@ -144,35 +151,33 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
 
   Future<void> _init() async {
     await fetchAll();
-    _startPeriodicSync();
-    // Auto-sync on app startup
-    syncNow();
+    _initConnectivityListener();
+    // Silent check on app startup (does not show intrusive progress unless changes exist)
+    silentSyncCheck();
+  }
+
+  void _initConnectivityListener() {
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
+      final isOffline = results.every((r) => r == ConnectivityResult.none);
+      if (_wasOffline && !isOffline) {
+        // Connectivity returned while app remains open -> trigger silent sync check
+        silentSyncCheck();
+      }
+      _wasOffline = isOffline;
+    });
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      syncNow();
+      silentSyncCheck();
     }
-  }
-
-  void _startPeriodicSync() {
-    _periodicSyncTimer?.cancel();
-    // Periodic sync check every 30 seconds for pending offline changes
-    _periodicSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
-      try {
-        final queue = await DatabaseHelper.instance.getSyncQueue();
-        if (queue.isNotEmpty && !_isSyncing) {
-          syncNow();
-        }
-      } catch (_) {}
-    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _periodicSyncTimer?.cancel();
+    _connectivitySubscription?.cancel();
     super.dispose();
   }
 
@@ -1515,26 +1520,95 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   }
 
   // Public sync entry point called by UI buttons and automatic triggers
-  Future<void> syncFromSheet() => syncNow();
+  Future<void> syncFromSheet() => syncNow(showLoading: true);
 
-  Future<void> syncNow() async {
+  /// Performs a silent check without showing a top-bar loading indicator.
+  /// Only starts actual synchronization if pending changes exist or remote data differs.
+  Future<void> silentSyncCheck() async {
+    if (_isSyncing) return;
+
+    final reachable = await SyncService.isBackendReachable();
+    if (!reachable) return;
+
+    final queue = await DatabaseHelper.instance.getSyncQueue();
+    if (queue.isNotEmpty) {
+      await syncNow(showLoading: true);
+      return;
+    }
+
+    // Check remote Google Sheets silently
+    final fetchResult = await SyncService.fetchFromSheet();
+    if (!fetchResult.isSuccess) return;
+
+    if (fetchResult.warnings.isNotEmpty) {
+      _syncWarnings.clear();
+      _syncWarnings.addAll(fetchResult.warnings);
+      notifyListeners();
+    }
+
+    final hasChanges = await _checkForRemoteChanges(fetchResult.data);
+    if (hasChanges) {
+      await _performSyncWithData(fetchResult.data, fetchResult.warnings, showLoading: true);
+    }
+  }
+
+  Future<bool> _checkForRemoteChanges(List<Map<String, dynamic>> remoteData) async {
+    if (remoteData.isEmpty) return false;
+    final db = await DatabaseHelper.instance.database;
+    final localTxRows = await db.query('transactions');
+    final Map<String, Map<String, dynamic>> localMap = {};
+    for (var r in localTxRows) {
+      final sId = r['sync_id']?.toString() ?? '';
+      if (sId.isNotEmpty) localMap[sId] = r;
+    }
+
+    for (var remote in remoteData) {
+      final rId = remote['id']?.toString().trim() ?? '';
+      if (rId.isEmpty) continue;
+      final local = localMap[rId];
+      if (local == null) {
+        return true; // New remote record
+      }
+      final localStatus = local['sync_status']?.toString() ?? 'synced';
+      if (localStatus == 'synced') {
+        final diffs = _compareAllSevenFields(
+          local, 
+          remote, 
+          local['walletId'] as int? ?? 0, 
+          local['toWalletId'] as int?, 
+          _getTypeFromLabel(remote['transectionType']?.toString() ?? ''),
+        );
+        if (diffs.isNotEmpty) {
+          return true; // Existing record updated on Sheet
+        }
+      }
+    }
+    return false;
+  }
+
+  Future<void> syncNow({bool showLoading = true}) async {
     if (_isSyncing) {
       _syncRequestedAgain = true;
       return;
     }
-    _isSyncing = true;
-    _syncStatusMessage = "Syncing...";
-    notifyListeners();
+    if (showLoading) {
+      _isSyncing = true;
+      _syncStatusMessage = "Syncing...";
+      notifyListeners();
+    }
 
     try {
-      // 1. Reconcile external changes from Google Sheets into local SQLite
-      await _reconcileFromSheet();
+      final fetchResult = await SyncService.fetchFromSheet();
+      if (!fetchResult.isSuccess) {
+        _syncStatusMessage = "Backend unreachable / Offline";
+        return;
+      }
 
-      // 2. Push all pending local changes to Google Sheets
+      await _reconcileFromData(fetchResult.data, fetchResult.warnings);
       await _pushPendingQueue();
 
       _lastSyncTime = DateTime.now();
-      _syncStatusMessage = "Synced";
+      _syncStatusMessage = _conflicts.isEmpty ? "Synced" : "Synced with conflicts";
     } catch (e) {
       debugPrint("Sync Error: $e");
       _syncStatusMessage = "Offline / Sync Error";
@@ -1543,21 +1617,52 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
       notifyListeners();
       if (_syncRequestedAgain) {
         _syncRequestedAgain = false;
-        syncNow();
+        syncNow(showLoading: showLoading);
       }
     }
   }
 
-  Future<void> _reconcileFromSheet() async {
-    final List<dynamic> remoteData = await SyncService.fetchFromSheet();
-    if (remoteData.isEmpty) {
-      // Offline or empty sheet
+  Future<void> _performSyncWithData(
+    List<Map<String, dynamic>> remoteData,
+    List<String> remoteWarnings, {
+    bool showLoading = true,
+  }) async {
+    if (_isSyncing) {
+      _syncRequestedAgain = true;
       return;
     }
+    if (showLoading) {
+      _isSyncing = true;
+      _syncStatusMessage = "Syncing...";
+      notifyListeners();
+    }
+
+    try {
+      await _reconcileFromData(remoteData, remoteWarnings);
+      await _pushPendingQueue();
+
+      _lastSyncTime = DateTime.now();
+      _syncStatusMessage = _conflicts.isEmpty ? "Synced" : "Synced with conflicts";
+    } catch (e) {
+      debugPrint("Sync Error: $e");
+      _syncStatusMessage = "Offline / Sync Error";
+    } finally {
+      _isSyncing = false;
+      notifyListeners();
+      if (_syncRequestedAgain) {
+        _syncRequestedAgain = false;
+        syncNow(showLoading: showLoading);
+      }
+    }
+  }
+
+  Future<void> _reconcileFromData(List<Map<String, dynamic>> remoteData, List<String> remoteWarnings) async {
+    _syncWarnings.clear();
+    _syncWarnings.addAll(remoteWarnings);
+    _conflicts.clear();
 
     final db = await DatabaseHelper.instance.database;
     await db.transaction((txn) async {
-      // Load all current local transactions
       final localTxRows = await txn.query('transactions');
       final Map<String, Map<String, dynamic>> localMapBySyncId = {};
       for (var row in localTxRows) {
@@ -1567,15 +1672,10 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         }
       }
 
-      final Set<String> remoteSyncIds = {};
-
       for (var item in remoteData) {
-        if (item is! Map) continue;
         final row = Map<String, dynamic>.from(item);
-
         final remoteId = row['id']?.toString().trim() ?? '';
         if (remoteId.isEmpty) continue;
-        remoteSyncIds.add(remoteId);
 
         final rawAmount = double.tryParse(row['amount']?.toString() ?? '0') ?? 0.0;
         final rawDate = _parseSheetDate(row['date']?.toString());
@@ -1591,14 +1691,12 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
 
         if (type == TransactionType.transfer && rawTitleCategory.isNotEmpty) {
           if (rawTitleCategory.startsWith('To ')) {
-            // "To TargetWallet" -> source is rawWalletName, destination is TargetWallet
             walletId = await _getOrCreateWalletIdInTx(txn, rawWalletName);
             final targetName = rawTitleCategory.substring(3).trim();
             if (targetName.isNotEmpty && targetName != rawWalletName) {
               toWalletId = await _getOrCreateWalletIdInTx(txn, targetName);
             }
           } else if (rawTitleCategory.startsWith('From ')) {
-            // "From SourceWallet" -> source is SourceWallet, destination is rawWalletName
             final sourceName = rawTitleCategory.substring(5).trim();
             if (sourceName.isNotEmpty && sourceName != rawWalletName) {
               walletId = await _getOrCreateWalletIdInTx(txn, sourceName);
@@ -1608,11 +1706,9 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
             walletId = await _getOrCreateWalletIdInTx(txn, rawWalletName);
           }
         } else {
-          // Regular transactions
           if (rawWalletName != 'N/A' && rawWalletName != 'Investment Principal' && rawWalletName != 'None' && rawWalletName != 'Loans' && rawWalletName.isNotEmpty) {
             walletId = await _getOrCreateWalletIdInTx(txn, rawWalletName);
           } else if (_isLoanTx(type) || type == TransactionType.income || type == TransactionType.expense) {
-            // Assign to default wallet if sheet name was "Loans" or N/A
             walletId = await _getDefaultWalletIdInTx(txn);
           }
         }
@@ -1677,7 +1773,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
           final localSyncStatus = localTx['sync_status']?.toString() ?? 'synced';
 
           if (localSyncStatus == 'synced') {
-            // Local record has no pending offline changes: apply remote Sheet edit
+            // Google Sheets is preferred source of truth for already-synchronized data
             await txn.update(
               'transactions',
               {
@@ -1695,22 +1791,34 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
               where: 'id = ?',
               whereArgs: [localTx['id']],
             );
-          } else if (localSyncStatus == 'pending') {
-            // CONFLICT: Modified independently in app AND Google Sheets!
-            final localAmount = (localTx['amount'] as num).toDouble();
-            final localNote = localTx['note']?.toString() ?? '';
+          } else {
+            // localSyncStatus == 'pending' or 'conflict'
+            // Compare all 7 fields!
+            final diffs = _compareAllSevenFields(localTx, row, walletId, toWalletId, type);
+            if (diffs.isNotEmpty) {
+              // Genuine conflict: Record clear warning and block transaction
+              final warningMsg = "Conflict on $remoteId: differing in ${diffs.join(', ')}";
+              _syncWarnings.add(warningMsg);
+              _conflicts.add({
+                'sync_id': remoteId,
+                'local_id': localTx['id'],
+                'differences': diffs,
+                'local': localTx,
+                'remote': row,
+              });
 
-            if (localAmount != rawAmount || localNote != rawNote) {
-              // Local is pending: Keep local change, but preserve remote Sheet amount in note to prevent silent loss
-              String mergedNote = localNote;
-              if (!mergedNote.contains('[Conflict: Sheet had')) {
-                mergedNote = mergedNote.isEmpty
-                    ? '[Conflict: Sheet had $rawAmount]'
-                    : '$mergedNote [Conflict: Sheet had $rawAmount]';
-              }
+              // Block conflicting transaction in SQLite without modifying original note or data
               await txn.update(
                 'transactions',
-                {'note': mergedNote},
+                {'sync_status': 'conflict'},
+                where: 'id = ?',
+                whereArgs: [localTx['id']],
+              );
+            } else {
+              // Data is identical: mark synced
+              await txn.update(
+                'transactions',
+                {'sync_status': 'synced'},
                 where: 'id = ?',
                 whereArgs: [localTx['id']],
               );
@@ -1719,31 +1827,123 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         }
       }
 
-      // Check for intentional deletions in Google Sheets:
-      // If a transaction was synced and is no longer present in Google Sheets:
-      for (var entry in localMapBySyncId.entries) {
-        final sId = entry.key;
-        final localRow = entry.value;
-        final status = localRow['sync_status']?.toString() ?? 'synced';
-        if (status == 'synced' && !remoteSyncIds.contains(sId)) {
-          // Safely delete locally since user deleted it in Google Sheets
-          await txn.delete('transactions', where: 'id = ?', whereArgs: [localRow['id']]);
-        }
-      }
+      // Finalized Deletion Rule (Section 8):
+      // Absence from Sheet is not reliable proof of deletion; retain local records!
 
-      // Recalculate wallet balances within the same atomic transaction
+      // Recalculate wallet balances within the atomic transaction
       await _recalculateWalletBalancesInTx(txn);
     });
 
     await fetchAll();
   }
 
+  List<String> _compareAllSevenFields(
+    Map<String, dynamic> localTx,
+    Map<String, dynamic> remoteRow,
+    int resolvedRemoteWalletId,
+    int? resolvedRemoteToWalletId,
+    TransactionType resolvedRemoteType,
+  ) {
+    final localWalletId = localTx['walletId'] as int?;
+    String localWName = '';
+    if (localWalletId != null && localWalletId != 0 && _wallets.isNotEmpty) {
+      localWName = _wallets.firstWhere((w) => w.id == localWalletId, orElse: () => _wallets.first).name;
+    }
+    return compareSevenFields(
+      localTx: localTx,
+      remoteRow: remoteRow,
+      resolvedRemoteWalletId: resolvedRemoteWalletId,
+      resolvedRemoteType: resolvedRemoteType,
+      localWalletName: localWName,
+    );
+  }
+
+  @visibleForTesting
+  static List<String> compareSevenFields({
+    required Map<String, dynamic> localTx,
+    required Map<String, dynamic> remoteRow,
+    required int resolvedRemoteWalletId,
+    required TransactionType resolvedRemoteType,
+    required String localWalletName,
+  }) {
+    final List<String> diffs = [];
+
+    // 1. Transaction ID: remoteRow['id'] == localTx['sync_id'] (already matched)
+
+    // 2. Date comparison (normalized by calendar day)
+    final localDateStr = localTx['date']?.toString().split('T').first ?? '';
+    final remoteDateParsed = parseSheetDate(remoteRow['date']?.toString()).split('T').first;
+    if (localDateStr != remoteDateParsed) {
+      diffs.add('Date (Local: $localDateStr, Sheet: $remoteDateParsed)');
+    }
+
+    // 3. Title/Category comparison (normalized)
+    final localTitle = (localTx['title']?.toString() ?? '').trim().toLowerCase();
+    final remoteTitle = (remoteRow['titleCategory']?.toString() ?? '').trim().toLowerCase();
+    if (localTitle != remoteTitle) {
+      diffs.add('Title/Category (Local: "${localTx['title']}", Sheet: "${remoteRow['titleCategory']}")');
+    }
+
+    // 4. Transaction Type comparison
+    final localType = localTx['type']?.toString().toLowerCase() ?? '';
+    final remoteType = resolvedRemoteType.name.toLowerCase();
+    if (localType != remoteType) {
+      diffs.add('Type (Local: "$localType", Sheet: "$remoteType")');
+    }
+
+    // 5. Amount comparison (tolerance 0.01)
+    final localAmount = (localTx['amount'] as num).toDouble();
+    final remoteAmount = double.tryParse(remoteRow['amount']?.toString() ?? '0') ?? 0.0;
+    if ((localAmount - remoteAmount).abs() > 0.01) {
+      diffs.add('Amount (Local: $localAmount, Sheet: $remoteAmount)');
+    }
+
+    // 6. Note comparison (trimmed)
+    final localNote = (localTx['note']?.toString() ?? '').trim();
+    final remoteNote = (remoteRow['note']?.toString() ?? '').trim();
+    if (localNote != remoteNote) {
+      diffs.add('Note (Local: "$localNote", Sheet: "$remoteNote")');
+    }
+
+    // 7. Wallet Name comparison
+    if (resolvedRemoteWalletId != 0 && localWalletName.isNotEmpty) {
+      final remoteWName = remoteRow['walletName']?.toString() ?? '';
+      if (localWalletName.trim().toLowerCase() != remoteWName.trim().toLowerCase()) {
+        diffs.add('Wallet (Local: "$localWalletName", Sheet: "$remoteWName")');
+      }
+    }
+
+    return diffs;
+  }
+
   Future<void> _pushPendingQueue() async {
     final queueItems = await DatabaseHelper.instance.getSyncQueue();
     if (queueItems.isEmpty) return;
 
-    final List<Map<String, dynamic>> batchOps = [];
+    final db = await DatabaseHelper.instance.database;
+    final txRows = await db.query('transactions');
+    final Map<String, String> statusBySyncId = {
+      for (var tx in txRows)
+        if (tx['sync_id'] != null) tx['sync_id'].toString(): tx['sync_status']?.toString() ?? 'synced'
+    };
+
+    // Filter queue items: Skip any transactions blocked due to conflict
+    final List<Map<String, dynamic>> eligibleQueueItems = [];
     for (var item in queueItems) {
+      final entityType = item['entity_type'] as String;
+      final entityId = item['entity_id'] as String;
+
+      if (entityType == 'transaction' && statusBySyncId[entityId] == 'conflict') {
+        // Blocked from automatic push until conflict resolved!
+        continue;
+      }
+      eligibleQueueItems.add(item);
+    }
+
+    if (eligibleQueueItems.isEmpty) return;
+
+    final List<Map<String, dynamic>> batchOps = [];
+    for (var item in eligibleQueueItems) {
       try {
         final payload = jsonDecode(item['payload'] as String);
         batchOps.add({
@@ -1753,81 +1953,83 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
       } catch (_) {}
     }
 
-    bool batchSuccess = false;
+    Set<String> successfullyProcessedIds = {};
     if (batchOps.isNotEmpty) {
       final batchResult = await SyncService.batchSync(batchOps);
-      if (batchResult['success'] == true) {
-        batchSuccess = true;
+      final List<dynamic> processed = batchResult['processedIds'] ?? [];
+      successfullyProcessedIds = processed.map((e) => e.toString()).toSet();
+
+      for (var item in eligibleQueueItems) {
+        final itemId = item['id'] as int;
+        final entityId = item['entity_id'] as String;
+        final action = item['action'] as String;
+
+        if (successfullyProcessedIds.contains(entityId)) {
+          await DatabaseHelper.instance.deleteSyncQueueItem(itemId);
+          if (action != 'delete') {
+            await db.update('transactions', {'sync_status': 'synced'}, where: 'sync_id = ?', whereArgs: [entityId]);
+          }
+        }
       }
     }
 
-    final db = await DatabaseHelper.instance.database;
+    // For any items not processed by batch, process remaining eligible items individually
+    final remainingQueue = await DatabaseHelper.instance.getSyncQueue();
+    for (var item in remainingQueue) {
+      final itemId = item['id'] as int;
+      final entityType = item['entity_type'] as String;
+      final entityId = item['entity_id'] as String;
+      final action = item['action'] as String;
 
-    if (batchSuccess) {
-      for (var item in queueItems) {
-        final itemId = item['id'] as int;
-        final entityId = item['entity_id'] as String;
-        final action = item['action'] as String;
-
-        await DatabaseHelper.instance.deleteSyncQueueItem(itemId);
-        if (action != 'delete') {
-          await db.update('transactions', {'sync_status': 'synced'}, where: 'sync_id = ?', whereArgs: [entityId]);
-        }
+      if (entityType == 'transaction' && statusBySyncId[entityId] == 'conflict') {
+        continue;
       }
-    } else {
-      // Fallback for legacy Apps Script deployments: process queue items individually
-      for (var item in queueItems) {
-        final itemId = item['id'] as int;
-        final entityType = item['entity_type'] as String;
-        final entityId = item['entity_id'] as String;
-        final action = item['action'] as String;
-        bool itemSuccess = false;
 
-        try {
-          final payload = jsonDecode(item['payload'] as String);
+      bool itemSuccess = false;
+      try {
+        final payload = jsonDecode(item['payload'] as String);
 
-          if (entityType == 'transaction') {
-            if (action == 'delete') {
-              itemSuccess = await SyncService.deleteTransaction(entityId);
-            } else {
-              itemSuccess = await SyncService.syncTransaction(
-                TransactionModel(
-                  syncId: payload['id']?.toString(),
-                  title: payload['titleCategory']?.toString() ?? '',
-                  amount: double.tryParse(payload['amount']?.toString() ?? '0') ?? 0.0,
-                  date: _parseSheetDateToDateTime(payload['date']?.toString()),
-                  note: payload['note']?.toString() ?? '',
-                  type: _getTypeFromLabel(payload['transectionType']?.toString() ?? 'Expense'),
-                  walletId: 0,
-                ),
-                payload['walletName']?.toString() ?? 'Main Wallet',
-                payload['titleCategory']?.toString() ?? '',
-                payload['transectionType']?.toString() ?? 'Expense',
-                secondaryTabName: payload['secondaryTabName']?.toString(),
-                action: 'create',
-              );
-            }
-          } else if (action == 'create_tab') {
-            itemSuccess = await SyncService.createTab(payload['tabName']?.toString() ?? '');
-          } else if (action == 'rename_tab') {
-            itemSuccess = await SyncService.renameTab(payload['oldTabName']?.toString() ?? '', payload['newTabName']?.toString() ?? '');
-          } else if (action == 'update_wallet_name') {
-            itemSuccess = await SyncService.updateWalletName(payload['oldName']?.toString() ?? '', payload['newName']?.toString() ?? '');
-          } else if (action == 'update_category_name') {
-            itemSuccess = await SyncService.updateCategoryName(payload['oldName']?.toString() ?? '', payload['newName']?.toString() ?? '');
-          }
-
-          if (itemSuccess) {
-            await DatabaseHelper.instance.deleteSyncQueueItem(itemId);
-            if (entityType == 'transaction' && action != 'delete') {
-              await db.update('transactions', {'sync_status': 'synced'}, where: 'sync_id = ?', whereArgs: [entityId]);
-            }
+        if (entityType == 'transaction') {
+          if (action == 'delete') {
+            itemSuccess = await SyncService.deleteTransaction(entityId);
           } else {
-            await DatabaseHelper.instance.updateSyncQueueRetry(itemId, 'Offline or failed');
+            itemSuccess = await SyncService.syncTransaction(
+              TransactionModel(
+                syncId: payload['id']?.toString(),
+                title: payload['titleCategory']?.toString() ?? '',
+                amount: double.tryParse(payload['amount']?.toString() ?? '0') ?? 0.0,
+                date: _parseSheetDateToDateTime(payload['date']?.toString()),
+                note: payload['note']?.toString() ?? '',
+                type: _getTypeFromLabel(payload['transectionType']?.toString() ?? 'Expense'),
+                walletId: 0,
+              ),
+              payload['walletName']?.toString() ?? 'Main Wallet',
+              payload['titleCategory']?.toString() ?? '',
+              payload['transectionType']?.toString() ?? 'Expense',
+              secondaryTabName: payload['secondaryTabName']?.toString(),
+              action: 'create',
+            );
           }
-        } catch (err) {
-          await DatabaseHelper.instance.updateSyncQueueRetry(itemId, err.toString());
+        } else if (action == 'create_tab') {
+          itemSuccess = await SyncService.createTab(payload['tabName']?.toString() ?? '');
+        } else if (action == 'rename_tab') {
+          itemSuccess = await SyncService.renameTab(payload['oldTabName']?.toString() ?? '', payload['newTabName']?.toString() ?? '');
+        } else if (action == 'update_wallet_name') {
+          itemSuccess = await SyncService.updateWalletName(payload['oldName']?.toString() ?? '', payload['newName']?.toString() ?? '');
+        } else if (action == 'update_category_name') {
+          itemSuccess = await SyncService.updateCategoryName(payload['oldName']?.toString() ?? '', payload['newName']?.toString() ?? '');
         }
+
+        if (itemSuccess) {
+          await DatabaseHelper.instance.deleteSyncQueueItem(itemId);
+          if (entityType == 'transaction' && action != 'delete') {
+            await db.update('transactions', {'sync_status': 'synced'}, where: 'sync_id = ?', whereArgs: [entityId]);
+          }
+        } else {
+          await DatabaseHelper.instance.updateSyncQueueRetry(itemId, 'Individual sync failed');
+        }
+      } catch (err) {
+        await DatabaseHelper.instance.updateSyncQueueRetry(itemId, err.toString());
       }
     }
   }
@@ -2106,14 +2308,23 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
     return fullTitle;
   }
 
-  String _parseSheetDate(String? raw) {
+  String _parseSheetDate(String? raw) => parseSheetDate(raw);
+
+  static String parseSheetDate(String? raw) {
     if (raw == null || raw.trim().isEmpty) return DateTime.now().toIso8601String();
     try {
       String s = raw.trim();
       
-      if (s.contains('T') || s.endsWith('Z')) {
-        final localDt = DateTime.parse(s).toLocal();
-        return DateTime(localDt.year, localDt.month, localDt.day, 12, 0, 0).toIso8601String();
+      // If it contains 'T', extract calendar date before 'T' to preserve calendar day across timezones
+      if (s.contains('T')) {
+        final datePart = s.split('T').first.trim();
+        final parts = datePart.split('-');
+        if (parts.length == 3 && parts[0].length == 4) {
+          int year = int.parse(parts[0]);
+          int month = int.parse(parts[1]);
+          int day = int.parse(parts[2].replaceAll(RegExp(r'\D'), ''));
+          return DateTime(year, month, day, 12, 0, 0).toIso8601String();
+        }
       }
 
       if (s.contains('-') || s.contains('/')) {
@@ -2143,7 +2354,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
           }
         }
       }
-      final parsed = DateTime.parse(s).toLocal();
+      final parsed = DateTime.parse(s);
       return DateTime(parsed.year, parsed.month, parsed.day, 12, 0, 0).toIso8601String();
     } catch (_) {
       return DateTime.now().toIso8601String();

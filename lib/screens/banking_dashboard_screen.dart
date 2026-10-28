@@ -13,8 +13,48 @@ import 'package:financeapp/models/transaction_model.dart';
 import 'package:financeapp/widgets/transaction_item.dart';
 import 'package:financeapp/widgets/update_checker.dart';
 
-class BankingDashboardScreen extends StatelessWidget {
+import 'package:financeapp/main.dart';
+
+class BankingDashboardScreen extends StatefulWidget {
   const BankingDashboardScreen({super.key});
+
+  @override
+  State<BankingDashboardScreen> createState() => _BankingDashboardScreenState();
+}
+
+class _BankingDashboardScreenState extends State<BankingDashboardScreen> with RouteAware {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<FinanceProvider>().silentSyncCheck();
+      }
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      routeObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void didPopNext() {
+    // Silent synchronization check when entering or returning to Homepage
+    if (mounted) {
+      context.read<FinanceProvider>().silentSyncCheck();
+    }
+  }
+
+  @override
+  void dispose() {
+    routeObserver.unsubscribe(this);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -54,6 +94,20 @@ class BankingDashboardScreen extends StatelessWidget {
               ),
             ),
           ),
+          if (provider.isSyncing)
+            const Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                bottom: false,
+                child: LinearProgressIndicator(
+                  minHeight: 2.5,
+                  backgroundColor: Colors.transparent,
+                  color: AppColors.primaryPurple,
+                ),
+              ),
+            ),
           SafeArea(
             bottom: false,
             child: RefreshIndicator(
@@ -172,6 +226,7 @@ class DashboardHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final finance = context.watch<FinanceProvider>();
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -222,10 +277,27 @@ class DashboardHeader extends StatelessWidget {
           children: [
             HeaderIconButton(
               icon: Icons.cloud_sync_rounded,
+              isLoading: finance.isSyncing,
+              hasWarning: finance.hasConflicts || finance.syncWarnings.isNotEmpty,
               onTap: () {
                 final messenger = ScaffoldMessenger.of(context);
-                final finance = context.read<FinanceProvider>();
-                messenger.showSnackBar(const SnackBar(content: Text('Syncing with Google Sheets...')));
+                if (finance.hasConflicts) {
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('${finance.conflicts.length} conflict(s) detected. Conflicting records blocked.'),
+                      backgroundColor: Colors.orange.shade800,
+                    ),
+                  );
+                } else if (finance.syncWarnings.isNotEmpty) {
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('Warning: ${finance.syncWarnings.first}'),
+                      backgroundColor: Colors.amber.shade900,
+                    ),
+                  );
+                } else {
+                  messenger.showSnackBar(const SnackBar(content: Text('Syncing with Google Sheets...')));
+                }
                 finance.syncFromSheet();
               },
             ),
@@ -259,7 +331,15 @@ class DashboardHeader extends StatelessWidget {
 class HeaderIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onTap;
-  const HeaderIconButton({required this.icon, this.onTap, super.key});
+  final bool isLoading;
+  final bool hasWarning;
+  const HeaderIconButton({
+    required this.icon,
+    this.onTap,
+    this.isLoading = false,
+    this.hasWarning = false,
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -272,7 +352,35 @@ class HeaderIconButton extends StatelessWidget {
         child: SizedBox(
           width: 42,
           height: 42,
-          child: Icon(icon, color: AppColors.primaryText, size: 22),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              if (isLoading)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.primaryPurple,
+                  ),
+                )
+              else
+                Icon(icon, color: AppColors.primaryText, size: 22),
+              if (hasWarning && !isLoading)
+                Positioned(
+                  top: 7,
+                  right: 7,
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      color: Colors.orange,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

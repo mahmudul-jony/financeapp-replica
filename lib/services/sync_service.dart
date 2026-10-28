@@ -3,6 +3,20 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/transaction_model.dart';
 
+class SheetFetchResult {
+  final bool isSuccess;
+  final List<Map<String, dynamic>> data;
+  final List<String> warnings;
+  final String? errorMessage;
+
+  const SheetFetchResult({
+    required this.isSuccess,
+    required this.data,
+    this.warnings = const [],
+    this.errorMessage,
+  });
+}
+
 class SyncService {
   // Deployed Web App URL from Apps Scripts
   static const String _scriptUrl = "https://script.google.com/macros/s/AKfycby8ONkqnwHncgrFniBxN8sCGEniukKiRaGFj2XxmJwEYeeIqzZXDjJr_U2joPmN5L7_yw/exec";
@@ -95,15 +109,19 @@ class SyncService {
       if (response.statusCode == 200 || response.statusCode == 302) {
         try {
           final decoded = jsonDecode(response.body);
-          if (decoded is Map<String, dynamic> && decoded['status'] == 'success') {
+          if (decoded is Map<String, dynamic>) {
+            final status = decoded['status'];
             final List<dynamic> ids = decoded['processedIds'] ?? [];
-            return {
-              "success": true,
-              "processedIds": ids.map((e) => e.toString()).toList(),
-            };
+            final processed = ids.map((e) => e.toString()).toList();
+            if (status == 'success' || status == 'partial') {
+              return {
+                "success": status == 'success',
+                "partial": status == 'partial',
+                "processedIds": processed,
+              };
+            }
           }
         } catch (_) {}
-        return {"success": true, "processedIds": <String>[]};
       }
     } catch (e) {
       debugPrint("Batch Sync Error: $e");
@@ -206,20 +224,42 @@ class SyncService {
     }
   }
 
-  static Future<List<dynamic>> fetchFromSheet() async {
-    if (_scriptUrl.isEmpty) return [];
+  static Future<SheetFetchResult> fetchFromSheet() async {
+    if (_scriptUrl.isEmpty) {
+      return const SheetFetchResult(isSuccess: false, data: [], errorMessage: "Script URL is empty");
+    }
 
     try {
       final response = await http.get(Uri.parse(_scriptUrl)).timeout(const Duration(seconds: 20));
       if (response.statusCode == 200 || response.statusCode == 302) {
         final decoded = jsonDecode(response.body);
-        if (decoded is List) {
-          return decoded;
+        if (decoded is Map<String, dynamic>) {
+          if (decoded['status'] == 'error') {
+            return SheetFetchResult(
+              isSuccess: false,
+              data: [],
+              errorMessage: decoded['message']?.toString(),
+            );
+          }
+          final List<dynamic> rawList = decoded['data'] is List ? decoded['data'] : [];
+          final List<String> warnings = (decoded['warnings'] is List)
+              ? (decoded['warnings'] as List).map((w) => w.toString()).toList()
+              : [];
+          final items = rawList.whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
+          return SheetFetchResult(isSuccess: true, data: items, warnings: warnings);
+        } else if (decoded is List) {
+          final items = decoded.whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
+          return SheetFetchResult(isSuccess: true, data: items);
         }
       }
+      return SheetFetchResult(
+        isSuccess: false,
+        data: [],
+        errorMessage: "HTTP ${response.statusCode}",
+      );
     } catch (e) {
       debugPrint("Fetch Error: $e");
+      return SheetFetchResult(isSuccess: false, data: [], errorMessage: e.toString());
     }
-    return [];
   }
 }

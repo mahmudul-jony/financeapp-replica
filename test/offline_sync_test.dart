@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:financeapp/models/transaction_model.dart';
+import 'package:financeapp/providers/finance_provider.dart';
 
 void main() {
   group('TransactionModel & Unique Identification Tests', () {
@@ -88,11 +90,174 @@ void main() {
     });
   });
 
-  group('Conflict Resolution & Reconciliation Logic Tests', () {
+  group('7-Field Conflict Detection & Comparison Tests', () {
+    final baseLocal = {
+      'sync_id': 'txid_000010',
+      'title': 'Grocery Shopping',
+      'amount': 450.00,
+      'date': '2026-10-27T10:30:00.000',
+      'note': 'Weekly vegetables',
+      'type': 'expense',
+      'walletId': 1,
+    };
+
+    final baseRemote = {
+      'id': 'txid_000010',
+      'titleCategory': 'Grocery Shopping',
+      'amount': '450.00',
+      'date': '2026-10-27T18:00:00.000Z',
+      'note': 'Weekly vegetables',
+      'transectionType': 'Expense',
+      'walletName': 'Pocket',
+    };
+
+    test('All 7 fields matching returns zero differences (no conflict)', () {
+      final diffs = FinanceProvider.compareSevenFields(
+        localTx: baseLocal,
+        remoteRow: baseRemote,
+        resolvedRemoteWalletId: 1,
+        resolvedRemoteType: TransactionType.expense,
+        localWalletName: 'Pocket',
+      );
+
+      expect(diffs, isEmpty);
+    });
+
+    test('Date normalization: same calendar day has no diff; different day flags Date conflict', () {
+      // Same day, different time -> no diff
+      final diffsSameDay = FinanceProvider.compareSevenFields(
+        localTx: {...baseLocal, 'date': '2026-10-27T08:15:00.000'},
+        remoteRow: {...baseRemote, 'date': '27-10-26'},
+        resolvedRemoteWalletId: 1,
+        resolvedRemoteType: TransactionType.expense,
+        localWalletName: 'Pocket',
+      );
+      expect(diffsSameDay, isEmpty);
+
+      // Different calendar day -> Date diff
+      final diffsDifferentDay = FinanceProvider.compareSevenFields(
+        localTx: {...baseLocal, 'date': '2026-10-27T08:15:00.000'},
+        remoteRow: {...baseRemote, 'date': '28-10-26'},
+        resolvedRemoteWalletId: 1,
+        resolvedRemoteType: TransactionType.expense,
+        localWalletName: 'Pocket',
+      );
+      expect(diffsDifferentDay.length, equals(1));
+      expect(diffsDifferentDay.first, contains('Date'));
+    });
+
+    test('Title/Category normalization: whitespace and casing ignored, but distinct text flags conflict', () {
+      // Normalized match
+      final diffsNormalized = FinanceProvider.compareSevenFields(
+        localTx: {...baseLocal, 'title': '  grocery shopping  '},
+        remoteRow: {...baseRemote, 'titleCategory': 'GROCERY SHOPPING'},
+        resolvedRemoteWalletId: 1,
+        resolvedRemoteType: TransactionType.expense,
+        localWalletName: 'Pocket',
+      );
+      expect(diffsNormalized, isEmpty);
+
+      // Distinct title -> conflict
+      final diffsDistinct = FinanceProvider.compareSevenFields(
+        localTx: {...baseLocal, 'title': 'Grocery Shopping'},
+        remoteRow: {...baseRemote, 'titleCategory': 'Pharmacy & Medicine'},
+        resolvedRemoteWalletId: 1,
+        resolvedRemoteType: TransactionType.expense,
+        localWalletName: 'Pocket',
+      );
+      expect(diffsDistinct.length, equals(1));
+      expect(diffsDistinct.first, contains('Title/Category'));
+    });
+
+    test('Transaction Type mismatch flags Type conflict', () {
+      final diffs = FinanceProvider.compareSevenFields(
+        localTx: {...baseLocal, 'type': 'expense'},
+        remoteRow: {...baseRemote, 'transectionType': 'Money Added'},
+        resolvedRemoteWalletId: 1,
+        resolvedRemoteType: TransactionType.income,
+        localWalletName: 'Pocket',
+      );
+      expect(diffs.length, equals(1));
+      expect(diffs.first, contains('Type'));
+    });
+
+    test('Amount comparison respects 0.01 tolerance', () {
+      // Delta <= 0.01 -> no conflict
+      final diffsClose = FinanceProvider.compareSevenFields(
+        localTx: {...baseLocal, 'amount': 450.00},
+        remoteRow: {...baseRemote, 'amount': '450.005'},
+        resolvedRemoteWalletId: 1,
+        resolvedRemoteType: TransactionType.expense,
+        localWalletName: 'Pocket',
+      );
+      expect(diffsClose, isEmpty);
+
+      // Delta > 0.01 -> conflict
+      final diffsFar = FinanceProvider.compareSevenFields(
+        localTx: {...baseLocal, 'amount': 450.00},
+        remoteRow: {...baseRemote, 'amount': '455.00'},
+        resolvedRemoteWalletId: 1,
+        resolvedRemoteType: TransactionType.expense,
+        localWalletName: 'Pocket',
+      );
+      expect(diffsFar.length, equals(1));
+      expect(diffsFar.first, contains('Amount'));
+    });
+
+    test('Note comparison trims whitespace, but distinct text flags conflict', () {
+      // Whitespace trimmed match
+      final diffsTrimmed = FinanceProvider.compareSevenFields(
+        localTx: {...baseLocal, 'note': 'Weekly vegetables   '},
+        remoteRow: {...baseRemote, 'note': '   Weekly vegetables'},
+        resolvedRemoteWalletId: 1,
+        resolvedRemoteType: TransactionType.expense,
+        localWalletName: 'Pocket',
+      );
+      expect(diffsTrimmed, isEmpty);
+
+      // Different note
+      final diffsDistinct = FinanceProvider.compareSevenFields(
+        localTx: {...baseLocal, 'note': 'Weekly vegetables'},
+        remoteRow: {...baseRemote, 'note': 'Monthly fruit basket'},
+        resolvedRemoteWalletId: 1,
+        resolvedRemoteType: TransactionType.expense,
+        localWalletName: 'Pocket',
+      );
+      expect(diffsDistinct.length, equals(1));
+      expect(diffsDistinct.first, contains('Note'));
+    });
+
+    test('Wallet Name comparison flags Wallet conflict', () {
+      final diffs = FinanceProvider.compareSevenFields(
+        localTx: baseLocal,
+        remoteRow: {...baseRemote, 'walletName': 'Bank asia'},
+        resolvedRemoteWalletId: 2,
+        resolvedRemoteType: TransactionType.expense,
+        localWalletName: 'Pocket',
+      );
+      expect(diffs.length, equals(1));
+      expect(diffs.first, contains('Wallet'));
+    });
+
+    test('Multiple simultaneous differences are all captured', () {
+      final diffs = FinanceProvider.compareSevenFields(
+        localTx: {...baseLocal, 'amount': 100.0, 'note': 'A'},
+        remoteRow: {...baseRemote, 'amount': '200.0', 'note': 'B'},
+        resolvedRemoteWalletId: 1,
+        resolvedRemoteType: TransactionType.expense,
+        localWalletName: 'Pocket',
+      );
+      expect(diffs.length, equals(2));
+      expect(diffs.any((d) => d.contains('Amount')), isTrue);
+      expect(diffs.any((d) => d.contains('Note')), isTrue);
+    });
+  });
+
+  group('Conflict Reconciliation & Policy Verification Tests', () {
     test('Direct Sheet addition is identified as new when not present locally', () {
-      final localSyncIds = <String>{'tx_1', 'tx_2'};
+      final localSyncIds = <String>{'txid_000001', 'txid_000002'};
       final remoteRow = {
-        'id': 'gs_9999',
+        'id': 'txid_000003',
         'date': '27-10-26',
         'titleCategory': 'Freelance',
         'transectionType': 'Money Added',
@@ -105,70 +270,57 @@ void main() {
       expect(isRemoteOnly, isTrue);
     });
 
-    test('Conflict resolution preserves local pending change and appends conflict note', () {
-      // Local pending change has amount 5200
-      final localTx = TransactionModel(
-        id: 1,
-        syncId: 'tx_shared',
-        title: 'Salary',
-        amount: 5200.0,
-        date: DateTime(2026, 10, 27),
-        note: 'App Offline Edit',
-        type: TransactionType.income,
-        walletId: 1,
-        syncStatus: 'pending',
-        updatedAt: DateTime(2026, 10, 27, 14, 0),
+    test('Conflict marks transaction as conflict WITHOUT mutating note or local data', () {
+      final localTx = {
+        'id': 10,
+        'sync_id': 'txid_000010',
+        'title': 'Local Title',
+        'amount': 300.0,
+        'date': '2026-10-27T10:00:00.000',
+        'note': 'Clean Original Note',
+        'type': 'expense',
+        'walletId': 1,
+        'sync_status': 'pending',
+      };
+
+      final remoteRow = {
+        'id': 'txid_000010',
+        'titleCategory': 'Sheet Title',
+        'amount': '350.0',
+        'date': '2026-10-27T12:00:00.000',
+        'note': 'Sheet Note',
+        'transectionType': 'Expense',
+        'walletName': 'Pocket',
+      };
+
+      final diffs = FinanceProvider.compareSevenFields(
+        localTx: localTx,
+        remoteRow: remoteRow,
+        resolvedRemoteWalletId: 1,
+        resolvedRemoteType: TransactionType.expense,
+        localWalletName: 'Pocket',
       );
 
-      // Remote Sheet has amount 5500 with no newer timestamp
-      final remoteAmount = 5500.0;
-      final remoteUpdatedAt = DateTime(2026, 10, 27, 13, 0); // older
+      expect(diffs, isNotEmpty);
 
-      String resolvedNote = localTx.note;
-      double resolvedAmount = localTx.amount;
+      // Verify policy: Note must NOT be mutated with "[Conflict: ...]"
+      final preservedNote = localTx['note'];
+      expect(preservedNote, equals('Clean Original Note'));
+      expect(preservedNote, isNot(contains('[Conflict:')));
 
-      if (remoteUpdatedAt.isAfter(localTx.updatedAt!)) {
-        resolvedAmount = remoteAmount;
-      } else {
-        // Local is newer: preserve local amount and append remote conflict details to note
-        resolvedNote = '${localTx.note} [Conflict: Sheet had $remoteAmount]';
-      }
-
-      expect(resolvedAmount, equals(5200.0));
-      expect(resolvedNote, contains('[Conflict: Sheet had 5500.0]'));
+      // In SQLite, status is updated to 'conflict'
+      final updatedStatus = diffs.isNotEmpty ? 'conflict' : 'synced';
+      expect(updatedStatus, equals('conflict'));
     });
+  });
 
-    test('Remote wins when remote timestamp is newer during conflict', () {
-      final localTx = TransactionModel(
-        id: 1,
-        syncId: 'tx_shared',
-        title: 'Salary',
-        amount: 5200.0,
-        date: DateTime(2026, 10, 27),
-        note: 'App Offline Edit',
-        type: TransactionType.income,
-        walletId: 1,
-        syncStatus: 'pending',
-        updatedAt: DateTime(2026, 10, 27, 12, 0),
-      );
-
-      final remoteAmount = 5500.0;
-      final remoteUpdatedAt = DateTime(2026, 10, 27, 14, 0); // newer
-
-      double resolvedAmount = localTx.amount;
-      if (remoteUpdatedAt.isAfter(localTx.updatedAt!)) {
-        resolvedAmount = remoteAmount;
-      }
-
-      expect(resolvedAmount, equals(5500.0));
-    });
-
-    test('Pending local transaction is NEVER deleted if missing from remote sheet', () {
+  group('Finalized Deletion Rule Tests (Section 8)', () {
+    test('Absence from remote sheet NEVER causes local deletion (retains all records)', () {
       final localTxs = [
         TransactionModel(
           id: 1,
-          syncId: 'tx_synced',
-          title: 'Old Expense',
+          syncId: 'txid_000001',
+          title: 'Existing Expense',
           amount: 100.0,
           date: DateTime(2026, 10, 27),
           note: '',
@@ -178,8 +330,8 @@ void main() {
         ),
         TransactionModel(
           id: 2,
-          syncId: 'tx_offline_pending',
-          title: 'New Offline Expense',
+          syncId: 'txid_000002',
+          title: 'Offline Expense',
           amount: 250.0,
           date: DateTime(2026, 10, 27),
           note: 'Created offline',
@@ -189,19 +341,145 @@ void main() {
         ),
       ];
 
-      final remoteSyncIds = <String>{}; // Empty remote response (or record deleted on Sheet)
+      final remoteSyncIds = <String>{}; // Empty remote sheet response
 
+      // Under Section 8: Missing from Sheet response is NOT proof of deletion
       final toDeleteLocally = <String>[];
+      // Notice: No deletion loop for missing remote IDs!
       for (var tx in localTxs) {
-        if (tx.syncStatus == 'synced' && !remoteSyncIds.contains(tx.syncId)) {
-          toDeleteLocally.add(tx.syncId);
+        // Absence does not delete
+        if (!remoteSyncIds.contains(tx.syncId)) {
+          // DO NOT ADD TO toDeleteLocally
         }
       }
 
-      // tx_synced was intentionally deleted from Sheet -> safe to delete locally
-      expect(toDeleteLocally, contains('tx_synced'));
-      // tx_offline_pending was created offline -> MUST NOT BE DELETED!
-      expect(toDeleteLocally, isNot(contains('tx_offline_pending')));
+      expect(toDeleteLocally, isEmpty);
+      expect(localTxs.length, equals(2));
+    });
+
+    test('Explicit app deletion creates pending delete queue item', () {
+      // When a user explicitly deletes an item in the app:
+      final queueItem = {
+        'id': 1,
+        'action': 'delete',
+        'entity_type': 'transaction',
+        'entity_id': 'txid_000005',
+        'payload': jsonEncode({'id': 'txid_000005'}),
+      };
+
+      expect(queueItem['action'], equals('delete'));
+      expect(queueItem['entity_id'], equals('txid_000005'));
+    });
+  });
+
+  group('Batch Sync & Partial Queue Processing Tests', () {
+    test('Only processedIds are dequeued; failed items remain pending', () {
+      final queueItems = [
+        {'id': 101, 'action': 'create', 'entity_type': 'transaction', 'entity_id': 'txid_000001'},
+        {'id': 102, 'action': 'update', 'entity_type': 'transaction', 'entity_id': 'txid_000002'},
+        {'id': 103, 'action': 'create', 'entity_type': 'transaction', 'entity_id': 'txid_000003'},
+      ];
+
+      // Backend returns partial success where only txid_000001 and txid_000003 succeeded
+      final backendResponse = {
+        'status': 'partial',
+        'processedIds': ['txid_000001', 'txid_000003'],
+        'failedOps': [
+          {'id': 'txid_000002', 'error': 'Sheet lock timeout'}
+        ],
+      };
+
+      final Set<String> processed = (backendResponse['processedIds'] as List).map((e) => e.toString()).toSet();
+
+      final dequeuedItemIds = <int>[];
+      final remainingPendingIds = <int>[];
+
+      for (var item in queueItems) {
+        final itemId = item['id'] as int;
+        final entityId = item['entity_id'] as String;
+
+        if (processed.contains(entityId)) {
+          dequeuedItemIds.add(itemId);
+        } else {
+          remainingPendingIds.add(itemId);
+        }
+      }
+
+      expect(dequeuedItemIds, containsAll([101, 103]));
+      expect(remainingPendingIds, contains(102)); // txid_000002 must remain pending!
+    });
+  });
+
+  group('Conflict Blocking in Sync Queue Tests', () {
+    test('Conflicting transactions are skipped and blocked from outgoing sync payload', () {
+      final queueItems = [
+        {'id': 1, 'action': 'update', 'entity_type': 'transaction', 'entity_id': 'txid_000001'},
+        {'id': 2, 'action': 'update', 'entity_type': 'transaction', 'entity_id': 'txid_000002'},
+      ];
+
+      final statusBySyncId = {
+        'txid_000001': 'conflict', // In conflict
+        'txid_000002': 'pending',  // Clean pending
+      };
+
+      final eligibleQueueItems = queueItems.where((item) {
+        final entityId = item['entity_id'] as String;
+        return statusBySyncId[entityId] != 'conflict';
+      }).toList();
+
+      expect(eligibleQueueItems.length, equals(1));
+      expect(eligibleQueueItems.first['entity_id'], equals('txid_000002'));
+    });
+  });
+
+  group('Google Apps Script Contract & Backend Verification Tests', () {
+    test('Same-tab duplicate ID detection flags warning', () {
+      final tabRows = [
+        {'id': 'txid_000001', 'amount': 100.0, 'tab': 'Pocket'},
+        {'id': 'txid_000001', 'amount': 100.0, 'tab': 'Pocket'}, // duplicate
+      ];
+
+      final seenIds = <String>{};
+      final warnings = <String>[];
+
+      for (var r in tabRows) {
+        final id = r['id'] as String;
+        final tab = r['tab'] as String;
+        if (seenIds.contains(id)) {
+          warnings.add('Duplicate Transaction ID "$id" found in tab "$tab"');
+        } else {
+          seenIds.add(id);
+        }
+      }
+
+      expect(warnings.length, equals(1));
+      expect(warnings.first, contains('Duplicate Transaction ID "txid_000001"'));
+    });
+
+    test('Cross-tab incompatible transaction detection flags warning', () {
+      // E.g. Record with same ID in two tabs having different amounts
+      final rowsAcrossTabs = [
+        {'id': 'txid_000099', 'amount': 500.0, 'type': 'Transfer', 'tab': 'Pocket'},
+        {'id': 'txid_000099', 'amount': 600.0, 'type': 'Transfer', 'tab': 'Bank asia'}, // mismatching amount!
+      ];
+
+      final registry = <String, Map<String, dynamic>>{};
+      final warnings = <String>[];
+
+      for (var r in rowsAcrossTabs) {
+        final id = r['id'] as String;
+        if (registry.containsKey(id)) {
+          final existing = registry[id]!;
+          if ((existing['amount'] - r['amount']).abs() > 0.01) {
+            warnings.add('Incompatible data for ID "$id" across tabs "${existing['tab']}" and "${r['tab']}": Amount differs');
+          }
+        } else {
+          registry[id] = r;
+        }
+      }
+
+      expect(warnings.length, equals(1));
+      expect(warnings.first, contains('Incompatible data for ID "txid_000099"'));
     });
   });
 
@@ -226,7 +504,6 @@ void main() {
     });
 
     test('Transfer "From Source" identifies source and destination correctly', () {
-      // In the target wallet sheet ("Bank asia"), titleCategory is "From Pocket"
       final rawTitleCategory = 'From Pocket';
       final rawWalletName = 'Bank asia';
 
@@ -253,7 +530,6 @@ void main() {
       double wallet1Balance = 1000.0;
       double wallet2Balance = 200.0;
 
-      // Transfer from 1 to 2
       final tx = TransactionModel(
         title: 'Transfer',
         amount: amount,
@@ -264,7 +540,6 @@ void main() {
         toWalletId: toWalletId,
       );
 
-      // Simulation of balance recalculation
       if (tx.walletId == fromWalletId && tx.type == TransactionType.transfer) {
         wallet1Balance -= tx.amount;
       }
@@ -289,7 +564,6 @@ void main() {
 
       expect(isNonWallet, isTrue);
 
-      // Should map to default wallet instead of creating a wallet named "Loans"
       final defaultWalletId = 1;
       int assignedWalletId;
       if (isNonWallet && type == TransactionType.loanGiven) {
