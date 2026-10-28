@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:financeapp/app_constants.dart';
 import 'package:financeapp/screens/signin_screen.dart';
+import 'package:financeapp/services/auth_service.dart';
 import 'package:provider/provider.dart';
 import 'package:financeapp/providers/finance_provider.dart';
 
@@ -38,24 +39,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildProfileHeader() => Column(
-    children: [
-      Stack(
-        alignment: Alignment.bottomRight,
-        children: [
-          const CircleAvatar(radius: 50, backgroundColor: AppColors.softLightPurple, child: Icon(Icons.person_rounded, size: 60, color: AppColors.primaryPurple)),
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: const BoxDecoration(color: AppColors.primaryPurple, shape: BoxShape.circle),
-            child: const Icon(Icons.edit_rounded, color: Colors.white, size: 16),
-          ),
-        ],
-      ),
-      const SizedBox(height: 16),
-      const Text('Mahmudul Hasan', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-      const Text('mahmudul@example.com', style: AppTypography.caption),
-    ],
-  );
+  Widget _buildProfileHeader() {
+    final authUser = context.watch<AuthService>().currentUser;
+    final String displayName = (authUser?.displayName != null && authUser!.displayName!.isNotEmpty)
+        ? authUser.displayName!
+        : 'Mahmudul Hasan';
+    final String email = (authUser?.email != null && authUser!.email.isNotEmpty)
+        ? authUser.email
+        : 'mahmudul@example.com';
+    final String? photoUrl = authUser?.photoUrl;
+
+    return Column(
+      children: [
+        Stack(
+          alignment: Alignment.bottomRight,
+          children: [
+            CircleAvatar(
+              radius: 50,
+              backgroundColor: AppColors.softLightPurple,
+              backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
+                  ? NetworkImage(photoUrl)
+                  : null,
+              child: (photoUrl == null || photoUrl.isEmpty)
+                  ? const Icon(Icons.person_rounded, size: 60, color: AppColors.primaryPurple)
+                  : null,
+            ),
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: const BoxDecoration(color: AppColors.primaryPurple, shape: BoxShape.circle),
+              child: const Icon(Icons.edit_rounded, color: Colors.white, size: 16),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Text(displayName, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+        Text(email, style: AppTypography.caption),
+      ],
+    );
+  }
 
   Widget _buildSettingsList() => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -179,30 +200,57 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ),
   );
 
-  Widget _buildLogoutButton() => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 24),
-    child: TextButton.icon(
-      onPressed: () => _showLogoutConfirmation(context),
-      icon: const Icon(Icons.logout_rounded, color: AppColors.expenseAlertText),
-      label: const Text('Logout Account', style: TextStyle(color: AppColors.expenseAlertText, fontWeight: FontWeight.w600)),
-      style: TextButton.styleFrom(
-        minimumSize: const Size(double.infinity, 50),
-        backgroundColor: AppColors.expenseAlertBackground.withOpacity(0.5),
-        shape: RoundedRectangleBorder(borderRadius: AppRadius.borderRadiusSmall),
+  Widget _buildLogoutButton() {
+    final authService = context.watch<AuthService>();
+    final isLoggingOut = authService.isLoading;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: TextButton.icon(
+        onPressed: isLoggingOut ? null : () => _showLogoutConfirmation(context),
+        icon: isLoggingOut
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.expenseAlertText),
+              )
+            : const Icon(Icons.logout_rounded, color: AppColors.expenseAlertText),
+        label: Text(
+          isLoggingOut ? 'Signing out...' : 'Logout Account',
+          style: const TextStyle(color: AppColors.expenseAlertText, fontWeight: FontWeight.w600),
+        ),
+        style: TextButton.styleFrom(
+          minimumSize: const Size(double.infinity, 50),
+          backgroundColor: AppColors.expenseAlertBackground.withOpacity(0.5),
+          shape: RoundedRectangleBorder(borderRadius: AppRadius.borderRadiusSmall),
+        ),
       ),
-    ),
-  );
+    );
+  }
 
   void _showLogoutConfirmation(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: const Text('Logout?'),
         content: const Text('Are you sure you want to sign out from your account?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const SignInScreen()), (r) => false), child: const Text('Logout', style: TextStyle(color: Colors.red))),
+          TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(dialogCtx);
+              await context.read<AuthService>().signOut();
+              if (context.mounted) {
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SignInScreen()),
+                  (r) => false,
+                );
+              }
+            },
+            child: const Text('Logout', style: TextStyle(color: Colors.red)),
+          ),
         ],
       ),
     );

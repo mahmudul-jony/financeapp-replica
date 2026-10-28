@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:financeapp/app_constants.dart';
+import 'package:financeapp/screens/banking_dashboard_screen.dart';
 import 'package:financeapp/screens/signin_screen.dart';
+import 'package:financeapp/services/auth_service.dart';
 import 'package:provider/provider.dart';
 import 'package:financeapp/providers/finance_provider.dart';
 import 'package:financeapp/providers/update_provider.dart';
@@ -12,6 +14,7 @@ void main() {
   runApp(
     MultiProvider(
       providers: [
+        ChangeNotifierProvider(create: (_) => AuthService()..initialize()),
         ChangeNotifierProvider(create: (_) => FinanceProvider()),
         ChangeNotifierProvider(create: (_) => UpdateProvider()),
       ],
@@ -36,9 +39,32 @@ class BankingDashboardApp extends StatelessWidget {
           brightness: Brightness.light,
         ),
         scaffoldBackgroundColor: AppColors.backgroundWhite,
-        // Removed explicit fontFamily to use system default and avoid black screen issues
       ),
-      home: const SignInScreen(),
+      home: const AuthGate(),
     );
+  }
+}
+
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final authService = context.watch<AuthService>();
+
+    if (authService.isInitializing) {
+      return const Scaffold(
+        backgroundColor: AppColors.backgroundWhite,
+        body: Center(
+          child: CircularProgressIndicator(color: AppColors.primaryPurple),
+        ),
+      );
+    }
+
+    if (authService.isAuthenticated) {
+      return const BankingDashboardScreen();
+    }
+
+    return const SignInScreen();
   }
 }
