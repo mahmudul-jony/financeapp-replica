@@ -1,13 +1,20 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'drive_resource_service.dart';
 
 class AuthService extends ChangeNotifier {
   static final AuthService _instance = AuthService._internal();
   factory AuthService() => _instance;
   AuthService._internal();
 
+  // Web Application Client ID from Google Cloud Console for backend OAuth token exchange
+  static const String webClientId = '974824598767-c6kjtpehg38o95jkme3b772atk2cn1o7.apps.googleusercontent.com';
+
+  // Initial sign-in uses standard profile scopes to prevent Android ApiException: 10 (DEVELOPER_ERROR).
+  // Drive and Sheets scopes are requested incrementally when accessing cloud storage.
   final GoogleSignIn _googleSignIn = GoogleSignIn(
+    serverClientId: webClientId,
     scopes: <String>[
       'email',
       'https://www.googleapis.com/auth/userinfo.profile',
@@ -35,11 +42,23 @@ class AuthService extends ChangeNotifier {
     _authSubscription?.cancel();
     _authSubscription = _googleSignIn.onCurrentUserChanged.listen((account) {
       _currentUser = account;
+      if (account != null) {
+        DriveResourceService.instance.getOrCreateResources().catchError((e) {
+          debugPrint("Drive init error on auth change: $e");
+          return const DriveResourceResult(isSuccess: false);
+        });
+      }
       notifyListeners();
     });
 
     try {
       _currentUser = await _googleSignIn.signInSilently();
+      if (_currentUser != null) {
+        DriveResourceService.instance.getOrCreateResources().catchError((e) {
+          debugPrint("Drive init error on silent sign-in: $e");
+          return const DriveResourceResult(isSuccess: false);
+        });
+      }
     } catch (e) {
       debugPrint("Silent sign-in check completed: $e");
     } finally {
@@ -63,6 +82,13 @@ class AuthService extends ChangeNotifier {
         _errorMessage = "Sign-in cancelled by user";
         return false;
       }
+
+      // Automatically find or create Financedatabase folder & Financedatasheet spreadsheet
+      unawaited(DriveResourceService.instance.getOrCreateResources().catchError((e) {
+        debugPrint("Error initializing drive resources: $e");
+        return const DriveResourceResult(isSuccess: false);
+      }));
+
       return true;
     } catch (e) {
       debugPrint("Google Sign-In Error: $e");
@@ -83,6 +109,7 @@ class AuthService extends ChangeNotifier {
     try {
       await _googleSignIn.signOut();
       _currentUser = null;
+      DriveResourceService.instance.clearCache();
     } catch (e) {
       debugPrint("Sign-out error: $e");
       _errorMessage = "Sign-out failed: ${e.toString()}";
@@ -97,13 +124,14 @@ class AuthService extends ChangeNotifier {
     try {
       await _googleSignIn.disconnect();
       _currentUser = null;
+      DriveResourceService.instance.clearCache();
       notifyListeners();
     } catch (e) {
       debugPrint("Disconnect error: $e");
     }
   }
 
-  /// Request additional OAuth scopes (e.g., for Drive & Sheets in Phase 2)
+  /// Request additional OAuth scopes (e.g. for Drive & Sheets)
   Future<bool> requestAdditionalScopes(List<String> scopes) async {
     try {
       return await _googleSignIn.requestScopes(scopes);
