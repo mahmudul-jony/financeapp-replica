@@ -3,8 +3,9 @@ import 'package:financeapp/models/transaction_model.dart';
 
 void main() {
   group('TransactionModel & Unique Identification Tests', () {
-    test('TransactionModel generates unique syncId when not provided', () {
+    test('TransactionModel formats syncId with formatSyncId when id is provided', () {
       final tx1 = TransactionModel(
+        id: 1,
         title: 'Salary',
         amount: 5000.0,
         date: DateTime(2026, 10, 27),
@@ -14,6 +15,7 @@ void main() {
       );
 
       final tx2 = TransactionModel(
+        id: 2,
         title: 'Food',
         amount: 250.0,
         date: DateTime(2026, 10, 27),
@@ -22,9 +24,8 @@ void main() {
         walletId: 1,
       );
 
-      expect(tx1.syncId, isNotEmpty);
-      expect(tx2.syncId, isNotEmpty);
-      expect(tx1.syncId, isNot(equals(tx2.syncId)));
+      expect(tx1.syncId, equals('txid_000001'));
+      expect(tx2.syncId, equals('txid_000002'));
       expect(tx1.syncStatus, equals('synced')); // default
     });
 
@@ -298,6 +299,41 @@ void main() {
       }
 
       expect(assignedWalletId, equals(1));
+    });
+  });
+
+  group('Sequential 6-digit txid_000000 format tests', () {
+    test('TransactionModel.formatSyncId formats integer IDs with 6-digit zero padding', () {
+      expect(TransactionModel.formatSyncId(1), equals('txid_000001'));
+      expect(TransactionModel.formatSyncId(42), equals('txid_000042'));
+      expect(TransactionModel.formatSyncId(999999), equals('txid_999999'));
+    });
+
+    test('TransactionModel fromMap defaults sync_id to formatted id when missing or empty', () {
+      final map = {
+        'id': 7,
+        'title': 'Coffee',
+        'amount': 120.0,
+        'date': '2026-10-27T12:00:00.000',
+        'type': 'expense',
+        'walletId': 1,
+      };
+
+      final tx = TransactionModel.fromMap(map);
+      expect(tx.syncId, equals('txid_000007'));
+    });
+
+    test('TransactionModel defaults syncId with formatSyncId if id is provided without syncId', () {
+      final tx = TransactionModel(
+        id: 15,
+        title: 'Books',
+        amount: 500.0,
+        date: DateTime(2026, 10, 27),
+        note: '',
+        type: TransactionType.expense,
+        walletId: 1,
+      );
+      expect(tx.syncId, equals('txid_000015'));
     });
   });
 }

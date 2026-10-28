@@ -4,12 +4,14 @@
  * DEPLOYMENT INSTRUCTIONS:
  * 1. Open Google Sheets → Extensions → Apps Script
  * 2. Replace all code with this file's content
- * 3. Save → Deploy → New Deployment (or Manage Deployments -> edit -> new version) → Web App
+ * 3. Save → Deploy → Manage Deployments → Edit (✏️) → New Version → Deploy
  * 4. Execute as: Me | Who has access: Anyone
- * 5. Copy the URL and ensure it matches _scriptUrl in lib/services/sync_service.dart
+ * 5. URL remains the same!
  * 
- * COLUMNS (A-H):
- * A: ID | B: Date | C: Title/Category | D: Transaction Type | E: Amount | F: Note | G: Wallet Name | H: Updated At
+ * COLUMNS (A-G):
+ * A: ID | B: Date | C: Title/Category | D: Transaction Type | E: Amount | F: Note | G: Wallet Name
+ * 
+ * ID FORMAT: txid_000001, txid_000002, ...
  */
 
 function doGet(e) {
@@ -19,6 +21,21 @@ function doGet(e) {
     var idMap = {};
     var tz = ss.getSpreadsheetTimeZone();
 
+    // Pass 1: Find the maximum txid number across all sheets
+    var maxTxNum = 0;
+    for (var s = 0; s < sheets.length; s++) {
+      var sData = sheets[s].getDataRange().getValues();
+      for (var r = 1; r < sData.length; r++) {
+        var existingId = sData[r][0] ? sData[r][0].toString().trim() : "";
+        var match = existingId.match(/^txid_(\d+)$/i);
+        if (match) {
+          var num = parseInt(match[1], 10);
+          if (num > maxTxNum) maxTxNum = num;
+        }
+      }
+    }
+
+    // Pass 2: Process all rows and assign sequential txid_000000 to empty rows
     for (var i = 0; i < sheets.length; i++) {
       var sheet = sheets[i];
       var sheetName = sheet.getName();
@@ -28,7 +45,7 @@ function doGet(e) {
       if (data.length > 1) {
         for (var j = 1; j < data.length; j++) {
           var row = data[j];
-          
+
           // Check if this row has any financial data (Date, Title, Type, Amount, Note, Wallet)
           var hasData = false;
           for (var col = 1; col < 7; col++) {
@@ -41,10 +58,11 @@ function doGet(e) {
 
           var id = row[0] ? row[0].toString().trim() : "";
 
-          // If ID is missing (e.g. user added row directly in Google Sheets):
-          // Generate a permanent unique ID and save it into Column A of the sheet!
+          // If ID is missing (user added row directly in Google Sheets):
+          // Generate sequential ID in txid_000001 format and save it into Column A
           if (!id) {
-            id = "gs_" + new Date().getTime() + "_" + Math.floor(Math.random() * 10000);
+            maxTxNum++;
+            id = "txid_" + padZero(maxTxNum, 6);
             sheet.getRange(j + 1, 1).setValue(id);
             row[0] = id;
           }
@@ -62,7 +80,6 @@ function doGet(e) {
           var amount = row[4] !== "" ? row[4] : 0;
           var note = row[5] ? row[5].toString() : "";
           var walletName = row[6] ? row[6].toString().trim() : sheetName;
-          var updatedAt = row[7] ? row[7].toString() : "";
 
           var record = {
             "id": id,
@@ -72,12 +89,10 @@ function doGet(e) {
             "amount": amount,
             "note": note,
             "walletName": walletName,
-            "updatedAt": updatedAt,
             "sheetName": sheetName
           };
 
           // Deduplication across multiple projection sheets:
-          // If transaction appears in multiple sheets (e.g., Transfer in Pocket & Bank Asia, or Loan in Pocket & Loans):
           if (idMap[id]) {
             var existing = idMap[id];
             // Prefer the "To " entry for transfers because it preserves source wallet
@@ -182,13 +197,13 @@ function doPost(e) {
       return jsonResponse({ status: "success", action: "update_category_name" });
     }
 
-    // 5. Update Wallet Name across ALL sheets (Column G / 7th Column)
+    // 5. Update Wallet Name across ALL sheets (Column G)
     if (action === "update_wallet_name") {
       updateWalletNameInternal(ss, contents.oldName, contents.newName);
       return jsonResponse({ status: "success", action: "update_wallet_name" });
     }
 
-    // 6. Create / Upsert Transaction (Idempotent: updates existing, appends if new)
+    // 6. Create / Upsert Transaction (Idempotent: updates existing row, appends if new)
     if (action === "create" || action === "create_wallet" || action === "upsert" || action === "update") {
       var payload = contents.payload;
       if (!payload) throw new Error("Missing payload");
@@ -265,7 +280,6 @@ function upsertTransactionRow(ss, sheetName, payload) {
   var amount = payload.amount !== undefined ? payload.amount : 0;
   var note = payload.note || "";
   var walletName = payload.walletName || sheetName;
-  var updatedAt = payload.updatedAt || new Date().toISOString();
 
   var data = sheet.getDataRange().getValues();
   var foundRow = -1;
@@ -279,11 +293,11 @@ function upsertTransactionRow(ss, sheetName, payload) {
     }
   }
 
-  var rowValues = [id, date, titleCategory, transectionType, amount, note, walletName, updatedAt];
+  var rowValues = [id, date, titleCategory, transectionType, amount, note, walletName];
 
   if (foundRow > 0) {
     // Update existing row in place (Prevents duplicates on retry!)
-    sheet.getRange(foundRow, 1, 1, 8).setValues([rowValues]);
+    sheet.getRange(foundRow, 1, 1, 7).setValues([rowValues]);
   } else {
     // Append new row
     sheet.appendRow(rowValues);
@@ -362,9 +376,15 @@ function createSheetWithHeaders(ss, name) {
 }
 
 function addHeaders(sheet) {
-  sheet.appendRow(["ID", "Date", "Title / Category", "Transaction Type", "Amount", "Note", "Wallet Name", "Updated At"]);
-  sheet.getRange("A1:H1").setFontWeight("bold").setBackground("#f3f3f3");
+  sheet.appendRow(["ID", "Date", "Title / Category", "Transaction Type", "Amount", "Note", "Wallet Name"]);
+  sheet.getRange("A1:G1").setFontWeight("bold").setBackground("#f3f3f3");
   sheet.setFrozenRows(1);
+}
+
+function padZero(num, size) {
+  var s = num + "";
+  while (s.length < size) s = "0" + s;
+  return s;
 }
 
 function jsonResponse(obj) {

@@ -367,9 +367,8 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
     );
 
     await db.transaction((txn) async {
-      final id = await txn.insert('transactions', tx.toMap());
       await txn.execute('UPDATE wallets SET balance = balance + ? WHERE id = ?', [amount, walletId]);
-      await _enqueueTxSyncInTx(txn, tx.copyWith(id: id), 'create');
+      await _insertTransactionInTx(txn, tx);
     });
 
     await fetchTransactions();
@@ -399,9 +398,8 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
     );
 
     await db.transaction((txn) async {
-      final id = await txn.insert('transactions', tx.toMap());
       await txn.execute('UPDATE wallets SET balance = balance - ? WHERE id = ?', [amount, walletId]);
-      await _enqueueTxSyncInTx(txn, tx.copyWith(id: id), 'create');
+      await _insertTransactionInTx(txn, tx);
     });
 
     await fetchTransactions();
@@ -433,10 +431,9 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
     );
 
     await db.transaction((txn) async {
-      final id = await txn.insert('transactions', tx.toMap());
       await txn.execute('UPDATE wallets SET balance = balance - ? WHERE id = ?', [amount, fromWalletId]);
       await txn.execute('UPDATE wallets SET balance = balance + ? WHERE id = ?', [amount, toWalletId]);
-      await _enqueueTxSyncInTx(txn, tx.copyWith(id: id), 'create');
+      await _insertTransactionInTx(txn, tx);
     });
 
     await fetchTransactions();
@@ -510,8 +507,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         syncStatus: 'pending',
         updatedAt: now,
       );
-      final gtxId = await txn.insert('transactions', gtx.toMap());
-      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
+      await _insertTransactionInTx(txn, gtx);
     });
     
     await fetchLoans();
@@ -563,8 +559,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         syncStatus: 'pending',
         updatedAt: now,
       );
-      final gtxId = await txn.insert('transactions', gtx.toMap());
-      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
+      await _insertTransactionInTx(txn, gtx);
     });
 
     await fetchLoans();
@@ -615,8 +610,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         syncStatus: 'pending',
         updatedAt: now,
       );
-      final gtxId = await txn.insert('transactions', gtx.toMap());
-      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
+      await _insertTransactionInTx(txn, gtx);
     });
     
     await fetchLoans();
@@ -677,8 +671,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         syncStatus: 'pending',
         updatedAt: now,
       );
-      final gtxId = await txn.insert('transactions', gtx.toMap());
-      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
+      await _insertTransactionInTx(txn, gtx);
     });
     
     await fetchLoans();
@@ -732,8 +725,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         syncStatus: 'pending',
         updatedAt: now,
       );
-      final gtxId = await txn.insert('transactions', gtx.toMap());
-      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
+      await _insertTransactionInTx(txn, gtx);
     });
 
     await fetchLoans();
@@ -816,8 +808,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         syncStatus: 'pending',
         updatedAt: now,
       );
-      final gtxId = await txn.insert('transactions', gtx.toMap());
-      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
+      await _insertTransactionInTx(txn, gtx);
       
       // Enqueue create tab
       await txn.insert('sync_queue', {
@@ -876,8 +867,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         syncStatus: 'pending',
         updatedAt: now,
       );
-      final gtxId = await txn.insert('transactions', gtx.toMap());
-      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
+      await _insertTransactionInTx(txn, gtx);
     });
 
     await fetchInvestments();
@@ -925,8 +915,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         syncStatus: 'pending',
         updatedAt: now,
       );
-      final gtxId = await txn.insert('transactions', gtx.toMap());
-      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
+      await _insertTransactionInTx(txn, gtx);
     });
 
     await fetchInvestments();
@@ -970,8 +959,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         syncStatus: 'pending',
         updatedAt: now,
       );
-      final gtxId = await txn.insert('transactions', gtx.toMap());
-      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
+      await _insertTransactionInTx(txn, gtx);
     });
 
     await fetchInvestments();
@@ -1017,8 +1005,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         syncStatus: 'pending',
         updatedAt: now,
       );
-      final gtxId = await txn.insert('transactions', gtx.toMap());
-      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
+      await _insertTransactionInTx(txn, gtx);
     });
 
     await fetchInvestments();
@@ -1064,8 +1051,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         syncStatus: 'pending',
         updatedAt: now,
       );
-      final gtxId = await txn.insert('transactions', gtx.toMap());
-      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
+      await _insertTransactionInTx(txn, gtx);
     });
 
     await fetchInvestments();
@@ -1136,8 +1122,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         syncStatus: 'pending',
         updatedAt: now,
       );
-      final gtxId = await txn.insert('transactions', gtx.toMap());
-      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
+      await _insertTransactionInTx(txn, gtx);
       
       // Enqueue create tab
       await txn.insert('sync_queue', {
@@ -1205,8 +1190,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         syncStatus: 'pending',
         updatedAt: now,
       );
-      final gtxId = await txn.insert('transactions', gtx.toMap());
-      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
+      await _insertTransactionInTx(txn, gtx);
     });
 
     await fetchSavings();
@@ -1260,8 +1244,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         syncStatus: 'pending',
         updatedAt: now,
       );
-      final gtxId = await txn.insert('transactions', gtx.toMap());
-      await _enqueueTxSyncInTx(txn, gtx.copyWith(id: gtxId), 'create');
+      await _insertTransactionInTx(txn, gtx);
     });
 
     await fetchSavings();
@@ -1601,7 +1584,6 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         final typeLabel = row['transectionType']?.toString() ?? 'Expense';
         final type = _getTypeFromLabel(typeLabel);
         final rawWalletName = row['walletName']?.toString() ?? 'Main Wallet';
-        final remoteUpdatedAt = row['updatedAt'] != null ? DateTime.tryParse(row['updatedAt'].toString()) : null;
 
         // Parse wallet and transfer destination
         int walletId = 0;
@@ -1688,7 +1670,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
             'toWalletId': toWalletId,
             'categoryId': categoryId,
             'sync_status': 'synced',
-            'updated_at': remoteUpdatedAt?.toIso8601String() ?? rawDate,
+            'updated_at': rawDate,
           });
         } else {
           // 2. Transaction exists on both sides
@@ -1708,7 +1690,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
                 'toWalletId': toWalletId,
                 'categoryId': categoryId,
                 'sync_status': 'synced',
-                'updated_at': remoteUpdatedAt?.toIso8601String() ?? rawDate,
+                'updated_at': rawDate,
               },
               where: 'id = ?',
               whereArgs: [localTx['id']],
@@ -1717,44 +1699,21 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
             // CONFLICT: Modified independently in app AND Google Sheets!
             final localAmount = (localTx['amount'] as num).toDouble();
             final localNote = localTx['note']?.toString() ?? '';
-            final localUpdatedAt = localTx['updated_at'] != null ? DateTime.tryParse(localTx['updated_at'].toString()) : null;
 
             if (localAmount != rawAmount || localNote != rawNote) {
-              if (remoteUpdatedAt != null && localUpdatedAt != null && remoteUpdatedAt.isAfter(localUpdatedAt)) {
-                // Remote edit is newer
-                await txn.update(
-                  'transactions',
-                  {
-                    'title': rawTitleCategory,
-                    'amount': rawAmount,
-                    'date': rawDate,
-                    'note': rawNote,
-                    'type': type.name,
-                    'walletId': walletId,
-                    'toWalletId': toWalletId,
-                    'categoryId': categoryId,
-                    'sync_status': 'synced',
-                    'updated_at': remoteUpdatedAt.toIso8601String(),
-                  },
-                  where: 'id = ?',
-                  whereArgs: [localTx['id']],
-                );
-              } else {
-                // Local is pending and newer (or remote was manual sheet edit without timestamp):
-                // Keep local change, but preserve remote Sheet amount in note to prevent silent loss
-                String mergedNote = localNote;
-                if (!mergedNote.contains('[Conflict: Sheet had')) {
-                  mergedNote = mergedNote.isEmpty
-                      ? '[Conflict: Sheet had $rawAmount]'
-                      : '$mergedNote [Conflict: Sheet had $rawAmount]';
-                }
-                await txn.update(
-                  'transactions',
-                  {'note': mergedNote},
-                  where: 'id = ?',
-                  whereArgs: [localTx['id']],
-                );
+              // Local is pending: Keep local change, but preserve remote Sheet amount in note to prevent silent loss
+              String mergedNote = localNote;
+              if (!mergedNote.contains('[Conflict: Sheet had')) {
+                mergedNote = mergedNote.isEmpty
+                    ? '[Conflict: Sheet had $rawAmount]'
+                    : '$mergedNote [Conflict: Sheet had $rawAmount]';
               }
+              await txn.update(
+                'transactions',
+                {'note': mergedNote},
+                where: 'id = ?',
+                whereArgs: [localTx['id']],
+              );
             }
           }
         }
@@ -1840,7 +1799,6 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
                   note: payload['note']?.toString() ?? '',
                   type: _getTypeFromLabel(payload['transectionType']?.toString() ?? 'Expense'),
                   walletId: 0,
-                  updatedAt: payload['updatedAt'] != null ? DateTime.tryParse(payload['updatedAt'].toString()) : null,
                 ),
                 payload['walletName']?.toString() ?? 'Main Wallet',
                 payload['titleCategory']?.toString() ?? '',
@@ -1874,6 +1832,15 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
     }
   }
 
+  Future<TransactionModel> _insertTransactionInTx(Transaction txn, TransactionModel tx) async {
+    final int id = await txn.insert('transactions', tx.toMap());
+    final String formattedSyncId = TransactionModel.formatSyncId(id);
+    await txn.update('transactions', {'sync_id': formattedSyncId}, where: 'id = ?', whereArgs: [id]);
+    final insertedTx = tx.copyWith(id: id, syncId: formattedSyncId);
+    await _enqueueTxSyncInTx(txn, insertedTx, 'create');
+    return insertedTx;
+  }
+
   Future<void> _enqueueTxSyncInTx(Transaction txn, TransactionModel tx, String action) async {
     final payload = _buildTxSyncPayload(tx);
     await txn.insert('sync_queue', {
@@ -1900,7 +1867,6 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         "note": tx.note,
         "walletName": fromWallet.name,
         "secondaryTabName": toWallet.name,
-        "updatedAt": (tx.updatedAt ?? DateTime.now()).toIso8601String(),
       };
     } else {
       String walletName = "N/A";
@@ -1938,7 +1904,6 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         "note": tx.note,
         "walletName": walletName,
         ...? (secondaryTabName != null ? {"secondaryTabName": secondaryTabName} : null),
-        "updatedAt": (tx.updatedAt ?? DateTime.now()).toIso8601String(),
       };
     }
   }

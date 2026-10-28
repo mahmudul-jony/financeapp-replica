@@ -42,7 +42,6 @@ class SyncService {
             "note": tx.note,
             "walletName": walletName,
             ...? (secondaryTabName != null ? {"secondaryTabName": secondaryTabName} : null),
-            "updatedAt": (tx.updatedAt ?? DateTime.now()).toIso8601String(),
           }
         }),
       ).timeout(const Duration(seconds: 15));

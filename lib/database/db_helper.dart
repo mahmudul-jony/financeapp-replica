@@ -109,7 +109,7 @@ class DatabaseHelper {
         await db.execute('ALTER TABLE transactions ADD COLUMN updated_at TEXT');
       } catch (_) {}
 
-      await db.execute('UPDATE transactions SET sync_id = CAST(id AS TEXT) WHERE sync_id IS NULL OR sync_id = ""');
+      await db.execute("UPDATE transactions SET sync_id = 'txid_' || SUBSTR('000000' || id, -6) WHERE sync_id IS NULL OR sync_id = '' OR sync_id NOT LIKE 'txid_%'");
       await db.execute('UPDATE transactions SET updated_at = date WHERE updated_at IS NULL');
       await db.execute('UPDATE transactions SET sync_status = "synced" WHERE sync_status IS NULL OR sync_status = ""');
 
@@ -375,6 +375,9 @@ class DatabaseHelper {
     await db.delete('savings_transactions');
     await db.delete('savings_allocations');
     await db.delete('sync_queue');
+    try {
+      await db.execute("DELETE FROM sqlite_sequence WHERE name IN ('transactions', 'sync_queue')");
+    } catch (_) {}
 
     // Insert Default Wallet
     await db.insert('wallets', {

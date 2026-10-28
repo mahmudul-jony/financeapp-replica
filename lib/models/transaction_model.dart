@@ -1,5 +1,3 @@
-import 'dart:math';
-
 enum TransactionType {
   income,
   expense,
@@ -50,12 +48,10 @@ class TransactionModel {
     this.updatedAt,
   }) : syncId = (syncId != null && syncId.trim().isNotEmpty)
             ? syncId.trim()
-            : (id != null ? id.toString() : _generateSyncId());
+            : (id != null ? formatSyncId(id) : '');
 
-  static String _generateSyncId() {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final rand = Random().nextInt(1000000).toString().padLeft(6, '0');
-    return 'tx_${now}_$rand';
+  static String formatSyncId(int id) {
+    return 'txid_${id.toString().padLeft(6, '0')}';
   }
 
   TransactionModel copyWith({
@@ -72,9 +68,10 @@ class TransactionModel {
     String? syncStatus,
     DateTime? updatedAt,
   }) {
+    final effectiveId = id ?? this.id;
     return TransactionModel(
-      id: id ?? this.id,
-      syncId: syncId ?? this.syncId,
+      id: effectiveId,
+      syncId: syncId ?? (this.syncId.isNotEmpty ? this.syncId : (effectiveId != null ? formatSyncId(effectiveId) : '')),
       title: title ?? this.title,
       amount: amount ?? this.amount,
       date: date ?? this.date,
@@ -142,7 +139,7 @@ class TransactionModel {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
-      'sync_id': syncId,
+      'sync_id': syncId.isNotEmpty ? syncId : (id != null ? formatSyncId(id!) : null),
       'title': title,
       'amount': amount,
       'date': "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}",
@@ -157,9 +154,15 @@ class TransactionModel {
   }
 
   factory TransactionModel.fromMap(Map<String, dynamic> map) {
+    final int? id = map['id'];
+    String sId = map['sync_id']?.toString() ?? '';
+    if (sId.isEmpty && id != null) {
+      sId = formatSyncId(id);
+    }
+
     return TransactionModel(
-      id: map['id'],
-      syncId: map['sync_id']?.toString() ?? (map['id']?.toString() ?? ''),
+      id: id,
+      syncId: sId,
       title: map['title'] ?? '',
       amount: (map['amount'] as num).toDouble(),
       date: DateTime.parse(map['date']),
