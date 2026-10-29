@@ -484,6 +484,22 @@ void main() {
   });
 
   group('Transfer Parsing & Direction Tests', () {
+    test('Transfer "From - To" format identifies source and destination correctly', () {
+      final rawTitleCategory = 'Citybank - BankAsia';
+      int? sourceWallet;
+      int? destWallet;
+      final walletIds = {'Citybank': 1, 'BankAsia': 2};
+
+      if (rawTitleCategory.contains(' - ')) {
+        final parts = rawTitleCategory.split(' - ');
+        sourceWallet = walletIds[parts[0].trim()];
+        destWallet = walletIds[parts[1].trim()];
+      }
+
+      expect(sourceWallet, equals(1)); // Citybank is SOURCE
+      expect(destWallet, equals(2));   // BankAsia is DESTINATION
+    });
+
     test('Transfer "To Target" identifies source and destination correctly', () {
       final rawTitleCategory = 'To Bank asia';
       final rawWalletName = 'Pocket';

@@ -41,6 +41,8 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   List<String> get syncWarnings => List.unmodifiable(_syncWarnings);
   List<Map<String, dynamic>> get conflicts => List.unmodifiable(_conflicts);
   bool get hasConflicts => _conflicts.isNotEmpty;
+  bool get isOffline => _wasOffline;
+  bool get isOnline => !_wasOffline;
 
   // Filter & Preferences State
   FilterType _currentFilter = FilterType.month;
@@ -157,13 +159,24 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   }
 
   void _initConnectivityListener() {
+    Connectivity().checkConnectivity().then((results) {
+      final isOffline = results.every((r) => r == ConnectivityResult.none);
+      if (_wasOffline != isOffline) {
+        _wasOffline = isOffline;
+        notifyListeners();
+      }
+    }).catchError((_) {});
+
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((results) {
       final isOffline = results.every((r) => r == ConnectivityResult.none);
       if (_wasOffline && !isOffline) {
         // Connectivity returned while app remains open -> trigger silent sync check
         silentSyncCheck();
       }
-      _wasOffline = isOffline;
+      if (_wasOffline != isOffline) {
+        _wasOffline = isOffline;
+        notifyListeners();
+      }
     });
   }
 
@@ -240,9 +253,6 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
     }
   }
 
-  void _triggerWalletSync(Wallet wallet) {
-    SyncService.createTab(wallet.name);
-  }
 
   Future<void> updateWallet(Wallet wallet) async {
     final oldWallet = _wallets.firstWhere((w) => w.id == wallet.id, orElse: () => wallet);
@@ -281,15 +291,43 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
     if (wallet.isDefault) throw Exception("Cannot delete default wallet");
 
     final db = await DatabaseHelper.instance.database;
-    final history = await db.query('transactions', where: 'walletId = ? OR toWalletId = ?', whereArgs: [id, id], limit: 1);
-    
-    if (history.isNotEmpty || wallet.balance > 0 || wallet.frozenAmount > 0) {
-      // Archive instead of hard delete
-      await db.update('wallets', {'is_archived': 1}, where: 'id = ?', whereArgs: [id]);
-    } else {
-      await DatabaseHelper.instance.delete('wallets', id);
+    final txs = await db.query('transactions', where: 'walletId = ? OR toWalletId = ?', whereArgs: [id, id]);
+
+    // Delete all associated transactions from local SQLite
+    await db.delete('transactions', where: 'walletId = ? OR toWalletId = ?', whereArgs: [id, id]);
+    // Delete the wallet itself
+    await DatabaseHelper.instance.delete('wallets', id);
+
+    // Enqueue tab deletion in Google Sheet
+    await db.insert('sync_queue', {
+      'entity_type': 'wallet',
+      'entity_id': id.toString(),
+      'action': 'delete_tab',
+      'payload': jsonEncode({'tabName': wallet.name}),
+      'created_at': DateTime.now().toIso8601String(),
+      'retry_count': 0,
+      'last_error': null,
+    });
+
+    // Enqueue deletion of each associated transaction in Google Sheet
+    for (var tx in txs) {
+      final syncId = tx['sync_id']?.toString();
+      if (syncId != null && syncId.isNotEmpty) {
+        await db.insert('sync_queue', {
+          'entity_type': 'transaction',
+          'entity_id': syncId,
+          'action': 'delete',
+          'payload': jsonEncode({'id': syncId}),
+          'created_at': DateTime.now().toIso8601String(),
+          'retry_count': 0,
+          'last_error': null,
+        });
+      }
     }
+
     await fetchWallets();
+    await fetchTransactions();
+    syncNow();
   }
 
   // --- Category Methods ---
@@ -335,13 +373,9 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
 
   Future<void> deleteCategory(int id) async {
     final db = await DatabaseHelper.instance.database;
-    final history = await db.query('transactions', where: 'categoryId = ?', whereArgs: [id], limit: 1);
-    
-    if (history.isNotEmpty) {
-      await db.update('categories', {'is_archived': 1}, where: 'id = ?', whereArgs: [id]);
-    } else {
-      await DatabaseHelper.instance.delete('categories', id);
-    }
+    // Category deletion rule: Retain all transactions, clear categoryId reference
+    await db.update('transactions', {'categoryId': null}, where: 'categoryId = ?', whereArgs: [id]);
+    await DatabaseHelper.instance.delete('categories', id);
     await fetchCategories();
   }
 
@@ -741,12 +775,16 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   }
 
   Future<int?> _getOrCreateCategoryIdInTx(Transaction txn, String name, TransactionType type) async {
-    final List<Map<String, dynamic>> cats = await txn.query('categories', where: 'name = ?', whereArgs: [name]);
-    if (cats.isNotEmpty) return cats.first['id'];
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return null;
+    final List<Map<String, dynamic>> cats = await txn.rawQuery(
+      'SELECT * FROM categories WHERE LOWER(name) = LOWER(?)', [trimmed]
+    );
+    if (cats.isNotEmpty) return cats.first['id'] as int;
     
     return await txn.insert('categories', {
-      'name': name,
-      'iconCode': name == 'Loan' ? 0xf276 : (name == 'Savings' ? 0xe581 : 0xe0b2),
+      'name': trimmed,
+      'iconCode': trimmed == 'Loan' ? 0xf276 : (trimmed == 'Savings' ? 0xe581 : 0xe0b2),
       'type': type == TransactionType.income || type == TransactionType.loanRecovered || type == TransactionType.investmentProfit || type == TransactionType.loanTaken
           ? 'income' : 'expense',
       'is_archived': 0
@@ -754,11 +792,34 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   }
 
   Future<void> deleteLoanRecipient(int id) async {
+    final rec = _loanRecipients.firstWhere((r) => r.id == id, orElse: () => LoanRecipient(id: id, name: '', totalAmount: 0, isDebt: false));
     final db = await DatabaseHelper.instance.database;
+
+    final txs = await db.query('transactions', where: "title LIKE ?", whereArgs: ["% · ${rec.name}"]);
+
     await db.delete('loan_transactions', where: 'recipientId = ?', whereArgs: [id]);
     await db.delete('loan_recipients', where: 'id = ?', whereArgs: [id]);
+    await db.delete('transactions', where: "title LIKE ?", whereArgs: ["% · ${rec.name}"]);
+
+    for (var tx in txs) {
+      final syncId = tx['sync_id']?.toString();
+      if (syncId != null && syncId.isNotEmpty) {
+        await db.insert('sync_queue', {
+          'entity_type': 'transaction',
+          'entity_id': syncId,
+          'action': 'delete',
+          'payload': jsonEncode({'id': syncId}),
+          'created_at': DateTime.now().toIso8601String(),
+          'retry_count': 0,
+          'last_error': null,
+        });
+      }
+    }
+
     await fetchLoans();
     await fetchLoanTransactions();
+    await fetchTransactions();
+    syncNow();
   }
 
   // --- Investment Methods ---
@@ -1066,11 +1127,47 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   }
 
   Future<void> deleteInvestment(int id) async {
+    final inv = _investments.firstWhere((i) => i.id == id, orElse: () => Investment(id: id, title: '', amount: 0, date: DateTime.now(), note: ''));
     final db = await DatabaseHelper.instance.database;
+
+    final txs = await db.query('transactions', where: "title LIKE ?", whereArgs: ["Investment: ${inv.title}%"]);
+
     await db.delete('investment_transactions', where: 'investmentId = ?', whereArgs: [id]);
     await db.delete('investments', where: 'id = ?', whereArgs: [id]);
+    await db.delete('transactions', where: "title LIKE ?", whereArgs: ["Investment: ${inv.title}%"]);
+
+    if (inv.title.isNotEmpty) {
+      await db.insert('sync_queue', {
+        'entity_type': 'investment',
+        'entity_id': id.toString(),
+        'action': 'delete_tab',
+        'payload': jsonEncode({'tabName': inv.title}),
+        'created_at': DateTime.now().toIso8601String(),
+        'retry_count': 0,
+        'last_error': null,
+      });
+
+      for (var tx in txs) {
+        final syncId = tx['sync_id']?.toString();
+        if (syncId != null && syncId.isNotEmpty) {
+          await db.insert('sync_queue', {
+            'entity_type': 'transaction',
+            'entity_id': syncId,
+            'action': 'delete',
+            'payload': jsonEncode({'id': syncId}),
+            'created_at': DateTime.now().toIso8601String(),
+            'retry_count': 0,
+            'last_error': null,
+          });
+        }
+      }
+    }
+
     await fetchInvestments();
     await fetchInvestmentTransactions();
+    await fetchTransactions();
+    await fetchWallets();
+    syncNow();
   }
 
   // --- Savings Methods ---
@@ -1260,11 +1357,58 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   }
 
   Future<void> deleteSavings(int id) async {
+    final sav = _savings.firstWhere((s) => s.id == id, orElse: () => Savings(id: id, title: '', amount: 0, date: DateTime.now(), note: ''));
     final db = await DatabaseHelper.instance.database;
+
+    // Restore frozen amounts in wallets
+    final allocs = await db.query('savings_allocations', where: 'savingsId = ?', whereArgs: [id]);
+    for (var a in allocs) {
+      final wId = a['walletId'] as int;
+      final amt = (a['amount'] as num).toDouble();
+      if (amt > 0) {
+        await db.execute('UPDATE wallets SET balance = balance + ?, frozen_amount = frozen_amount - ? WHERE id = ?', [amt, amt, wId]);
+      }
+    }
+
+    final txs = await db.query('transactions', where: "title LIKE ?", whereArgs: ["Savings: ${sav.title}%"]);
+
+    await db.delete('savings_allocations', where: 'savingsId = ?', whereArgs: [id]);
     await db.delete('savings_transactions', where: 'savingsId = ?', whereArgs: [id]);
     await db.delete('savings', where: 'id = ?', whereArgs: [id]);
+    await db.delete('transactions', where: "title LIKE ?", whereArgs: ["Savings: ${sav.title}%"]);
+
+    if (sav.title.isNotEmpty) {
+      await db.insert('sync_queue', {
+        'entity_type': 'savings',
+        'entity_id': id.toString(),
+        'action': 'delete_tab',
+        'payload': jsonEncode({'tabName': sav.title}),
+        'created_at': DateTime.now().toIso8601String(),
+        'retry_count': 0,
+        'last_error': null,
+      });
+
+      for (var tx in txs) {
+        final syncId = tx['sync_id']?.toString();
+        if (syncId != null && syncId.isNotEmpty) {
+          await db.insert('sync_queue', {
+            'entity_type': 'transaction',
+            'entity_id': syncId,
+            'action': 'delete',
+            'payload': jsonEncode({'id': syncId}),
+            'created_at': DateTime.now().toIso8601String(),
+            'retry_count': 0,
+            'last_error': null,
+          });
+        }
+      }
+    }
+
     await fetchSavings();
     await fetchSavingsTransactions();
+    await fetchTransactions();
+    await fetchWallets();
+    syncNow();
   }
 
   Future<List<Wallet>> getWalletsForSavings(int savingsId) async {
@@ -1509,14 +1653,12 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
 
   // --- Reset & Sync Logic ---
   Future<void> resetApp() async {
-    await SyncService.resetSheet();
+    await SyncService.resetSheet(defaultWalletName: 'Main Wallet');
     await DatabaseHelper.instance.resetDatabase();
     await fetchAll();
-
-    if (_wallets.isNotEmpty) {
-      final defaultWallet = _wallets.firstWhere((w) => w.isDefault, orElse: () => _wallets.first);
-      _triggerWalletSync(defaultWallet);
-    }
+    _conflicts.clear();
+    _syncWarnings.clear();
+    notifyListeners();
   }
 
   // Public sync entry point called by UI buttons and automatic triggers
@@ -1685,73 +1827,90 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         final type = _getTypeFromLabel(typeLabel);
         final rawWalletName = row['walletName']?.toString() ?? 'Main Wallet';
 
+        final localTx = localMapBySyncId[remoteId];
+
         // Parse wallet and transfer destination
         int walletId = 0;
         int? toWalletId;
-
-        if (type == TransactionType.transfer && rawTitleCategory.isNotEmpty) {
-          if (rawTitleCategory.startsWith('To ')) {
-            walletId = await _getOrCreateWalletIdInTx(txn, rawWalletName);
-            final targetName = rawTitleCategory.substring(3).trim();
-            if (targetName.isNotEmpty && targetName != rawWalletName) {
-              toWalletId = await _getOrCreateWalletIdInTx(txn, targetName);
-            }
-          } else if (rawTitleCategory.startsWith('From ')) {
-            final sourceName = rawTitleCategory.substring(5).trim();
-            if (sourceName.isNotEmpty && sourceName != rawWalletName) {
-              walletId = await _getOrCreateWalletIdInTx(txn, sourceName);
-            }
-            toWalletId = await _getOrCreateWalletIdInTx(txn, rawWalletName);
-          } else {
-            walletId = await _getOrCreateWalletIdInTx(txn, rawWalletName);
-          }
-        } else {
-          if (rawWalletName != 'N/A' && rawWalletName != 'Investment Principal' && rawWalletName != 'None' && rawWalletName != 'Loans' && rawWalletName.isNotEmpty) {
-            walletId = await _getOrCreateWalletIdInTx(txn, rawWalletName);
-          } else if (_isLoanTx(type) || type == TransactionType.income || type == TransactionType.expense) {
-            walletId = await _getDefaultWalletIdInTx(txn);
-          }
-        }
-
-        // Category & Entity handling
         int? categoryId;
-        if (type == TransactionType.income || type == TransactionType.expense) {
-          categoryId = await _getOrCreateCategoryIdInTx(txn, rawTitleCategory, type);
-        } else if (rawTitleCategory.isNotEmpty && rawTitleCategory != 'General') {
-          if (_isInvestmentTx(type)) {
-            final exists = (await txn.query('investments', where: 'title = ?', whereArgs: [rawTitleCategory])).isNotEmpty;
-            if (!exists) {
-              await txn.insert('investments', {
-                'title': rawTitleCategory,
-                'amount': 0.0,
-                'date': rawDate,
-                'note': 'Synced from Sheet',
-              });
+
+        if (localTx != null) {
+          // If transaction already exists locally, preserve existing walletId, toWalletId, and categoryId
+          // to prevent entity duplicates when entities are renamed.
+          walletId = localTx['walletId'] as int? ?? 0;
+          toWalletId = localTx['toWalletId'] as int?;
+          categoryId = localTx['categoryId'] as int?;
+        } else {
+          if (type == TransactionType.transfer && rawTitleCategory.isNotEmpty) {
+            if (rawTitleCategory.contains(' - ')) {
+              final parts = rawTitleCategory.split(' - ');
+              final sourceName = parts[0].trim();
+              final targetName = parts.length > 1 ? parts[1].trim() : '';
+              walletId = await _getOrCreateWalletIdInTx(txn, sourceName);
+              if (targetName.isNotEmpty && targetName.toLowerCase() != sourceName.toLowerCase()) {
+                toWalletId = await _getOrCreateWalletIdInTx(txn, targetName);
+              }
+            } else if (rawTitleCategory.startsWith('To ')) {
+              walletId = await _getOrCreateWalletIdInTx(txn, rawWalletName);
+              final targetName = rawTitleCategory.substring(3).trim();
+              if (targetName.isNotEmpty && targetName.toLowerCase() != rawWalletName.toLowerCase()) {
+                toWalletId = await _getOrCreateWalletIdInTx(txn, targetName);
+              }
+            } else if (rawTitleCategory.startsWith('From ')) {
+              final sourceName = rawTitleCategory.substring(5).trim();
+              if (sourceName.isNotEmpty && sourceName.toLowerCase() != rawWalletName.toLowerCase()) {
+                walletId = await _getOrCreateWalletIdInTx(txn, sourceName);
+              }
+              toWalletId = await _getOrCreateWalletIdInTx(txn, rawWalletName);
+            } else {
+              walletId = await _getOrCreateWalletIdInTx(txn, rawWalletName);
             }
-          } else if (_isSavingsTx(type)) {
-            final exists = (await txn.query('savings', where: 'title = ?', whereArgs: [rawTitleCategory])).isNotEmpty;
-            if (!exists) {
-              await txn.insert('savings', {
-                'title': rawTitleCategory,
-                'amount': 0.0,
-                'date': rawDate,
-                'note': 'Synced from Sheet',
-              });
+          } else {
+            if (rawWalletName != 'N/A' && rawWalletName != 'Investment Principal' && rawWalletName != 'None' && rawWalletName != 'Loans' && rawWalletName.isNotEmpty) {
+              walletId = await _getOrCreateWalletIdInTx(txn, rawWalletName);
+            } else if (_isLoanTx(type) || type == TransactionType.income || type == TransactionType.expense) {
+              walletId = await _getDefaultWalletIdInTx(txn);
             }
-          } else if (_isLoanTx(type)) {
-            bool isDebt = type == TransactionType.loanTaken || type == TransactionType.loanTakenMore || type == TransactionType.loanRepaid;
-            final exists = (await txn.query('loan_recipients', where: 'name = ? AND isDebt = ?', whereArgs: [rawTitleCategory, isDebt ? 1 : 0])).isNotEmpty;
-            if (!exists) {
-              await txn.insert('loan_recipients', {
-                'name': rawTitleCategory,
-                'totalAmount': 0.0,
-                'isDebt': isDebt ? 1 : 0,
-              });
+          }
+
+          // Category & Entity handling for new remote transactions
+          if (type == TransactionType.income || type == TransactionType.expense) {
+            categoryId = await _getOrCreateCategoryIdInTx(txn, rawTitleCategory, type);
+          } else if (rawTitleCategory.isNotEmpty && rawTitleCategory != 'General') {
+            final entityTitle = _extractName(rawTitleCategory);
+            if (_isInvestmentTx(type)) {
+              final exists = (await txn.rawQuery('SELECT * FROM investments WHERE LOWER(title) = LOWER(?)', [entityTitle])).isNotEmpty;
+              if (!exists) {
+                await txn.insert('investments', {
+                  'title': entityTitle,
+                  'amount': 0.0,
+                  'date': rawDate,
+                  'note': 'Synced from Sheet',
+                });
+              }
+            } else if (_isSavingsTx(type)) {
+              final exists = (await txn.rawQuery('SELECT * FROM savings WHERE LOWER(title) = LOWER(?)', [entityTitle])).isNotEmpty;
+              if (!exists) {
+                await txn.insert('savings', {
+                  'title': entityTitle,
+                  'amount': 0.0,
+                  'date': rawDate,
+                  'note': 'Synced from Sheet',
+                });
+              }
+            } else if (_isLoanTx(type)) {
+              bool isDebt = type == TransactionType.loanTaken || type == TransactionType.loanTakenMore || type == TransactionType.loanRepaid;
+              final exists = (await txn.rawQuery('SELECT * FROM loan_recipients WHERE LOWER(name) = LOWER(?) AND isDebt = ?', [entityTitle, isDebt ? 1 : 0])).isNotEmpty;
+              if (!exists) {
+                await txn.insert('loan_recipients', {
+                  'name': entityTitle,
+                  'totalAmount': 0.0,
+                  'isDebt': isDebt ? 1 : 0,
+                });
+              }
             }
           }
         }
-
-        final localTx = localMapBySyncId[remoteId];
 
         if (localTx == null) {
           // 1. Transaction added directly in Google Sheets while app was offline
@@ -2012,6 +2171,8 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
           }
         } else if (action == 'create_tab') {
           itemSuccess = await SyncService.createTab(payload['tabName']?.toString() ?? '');
+        } else if (action == 'delete_tab') {
+          itemSuccess = await SyncService.deleteTab(payload['tabName']?.toString() ?? '');
         } else if (action == 'rename_tab') {
           itemSuccess = await SyncService.renameTab(payload['oldTabName']?.toString() ?? '', payload['newTabName']?.toString() ?? '');
         } else if (action == 'update_wallet_name') {
@@ -2063,7 +2224,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
       return {
         "id": tx.syncId,
         "date": "${tx.date.day.toString().padLeft(2, '0')}-${tx.date.month.toString().padLeft(2, '0')}-${tx.date.year.toString().substring(2)}",
-        "titleCategory": "To ${toWallet.name}",
+        "titleCategory": "${fromWallet.name} - ${toWallet.name}",
         "transectionType": _getTransectionTypeLabel(tx.type),
         "amount": tx.amount,
         "note": tx.note,
@@ -2228,10 +2389,14 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   }
 
   Future<int> _getOrCreateWalletIdInTx(Transaction txn, String name) async {
-    final List<Map<String, dynamic>> res = await txn.query('wallets', where: 'name = ?', whereArgs: [name]);
-    if (res.isNotEmpty) return res.first['id'];
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return await _getDefaultWalletIdInTx(txn);
+    final List<Map<String, dynamic>> res = await txn.rawQuery(
+      'SELECT * FROM wallets WHERE LOWER(name) = LOWER(?)', [trimmed]
+    );
+    if (res.isNotEmpty) return res.first['id'] as int;
     return await txn.insert('wallets', {
-      'name': name,
+      'name': trimmed,
       'balance': 0.0,
       'frozen_amount': 0.0,
       'color': 0xFF2196F3,
@@ -2303,9 +2468,11 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   }
 
   String _extractName(String fullTitle) {
-    if (fullTitle.contains(': ')) return fullTitle.split(': ').last;
-    if (fullTitle.contains('· ')) return fullTitle.split('· ').last;
-    return fullTitle;
+    String t = fullTitle.trim();
+    if (t.contains(': ')) return t.split(': ').last.trim();
+    if (t.contains(' · ')) return t.split(' · ').last.trim();
+    if (t.contains('·')) return t.split('·').last.trim();
+    return t;
   }
 
   String _parseSheetDate(String? raw) => parseSheetDate(raw);

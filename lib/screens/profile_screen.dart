@@ -40,14 +40,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildProfileHeader() {
-    final authUser = context.watch<AuthService>().currentUser;
-    final String displayName = (authUser?.displayName != null && authUser!.displayName!.isNotEmpty)
-        ? authUser.displayName!
+    final authService = context.watch<AuthService>();
+    final String displayName = authService.displayName.isNotEmpty
+        ? authService.displayName
         : 'Mahmudul Hasan';
-    final String email = (authUser?.email != null && authUser!.email.isNotEmpty)
-        ? authUser.email
+    final String email = (authService.currentUser?.email != null && authService.currentUser!.email.isNotEmpty)
+        ? authService.currentUser!.email
         : 'mahmudul@example.com';
-    final String? photoUrl = authUser?.photoUrl;
+    final String? photoUrl = authService.photoUrl;
 
     return Column(
       children: [
@@ -64,10 +64,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ? const Icon(Icons.person_rounded, size: 60, color: AppColors.primaryPurple)
                   : null,
             ),
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: const BoxDecoration(color: AppColors.primaryPurple, shape: BoxShape.circle),
-              child: const Icon(Icons.edit_rounded, color: Colors.white, size: 16),
+            GestureDetector(
+              onTap: () => _showEditProfileDialog(context, authService),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: const BoxDecoration(
+                  color: AppColors.primaryPurple,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.edit_rounded, color: Colors.white, size: 18),
+              ),
             ),
           ],
         ),
@@ -212,18 +218,105 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ? const SizedBox(
                 width: 18,
                 height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.expenseAlertText),
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
               )
-            : const Icon(Icons.logout_rounded, color: AppColors.expenseAlertText),
+            : const Icon(Icons.logout_rounded, color: Colors.white),
         label: Text(
           isLoggingOut ? 'Signing out...' : 'Logout Account',
-          style: const TextStyle(color: AppColors.expenseAlertText, fontWeight: FontWeight.w600),
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
         ),
         style: TextButton.styleFrom(
           minimumSize: const Size(double.infinity, 50),
-          backgroundColor: AppColors.expenseAlertBackground.withOpacity(0.5),
-          shape: RoundedRectangleBorder(borderRadius: AppRadius.borderRadiusSmall),
+          backgroundColor: const Color(0xFFFD3C4A), // Solid red fill color
+          shape: RoundedRectangleBorder(borderRadius: AppRadius.borderRadiusMedium),
         ),
+      ),
+    );
+  }
+
+  void _showEditProfileDialog(BuildContext context, AuthService authService) {
+    final firstCtrl = TextEditingController(text: authService.firstName);
+    final lastCtrl = TextEditingController(text: authService.lastName);
+    final photoCtrl = TextEditingController(text: authService.customPhotoUrl ?? authService.currentUser?.photoUrl ?? '');
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Text('Edit Profile', style: AppTypography.title),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: firstCtrl,
+                decoration: InputDecoration(
+                  labelText: 'First Name',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  prefixIcon: const Icon(Icons.person_outline_rounded),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: lastCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Last Name',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  prefixIcon: const Icon(Icons.person_outline_rounded),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: photoCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Profile Photo URL (Optional)',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  prefixIcon: const Icon(Icons.image_outlined),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Cancel', style: TextStyle(color: AppColors.secondaryText)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primaryPurple,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () async {
+              final newFirst = firstCtrl.text.trim();
+              final newLast = lastCtrl.text.trim();
+              final newPhoto = photoCtrl.text.trim();
+
+              if (newFirst.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('First name cannot be empty')),
+                );
+                return;
+              }
+
+              await authService.updateProfile(
+                firstName: newFirst,
+                lastName: newLast,
+                photoUrl: newPhoto.isNotEmpty ? newPhoto : null,
+              );
+
+              if (dialogCtx.mounted) {
+                Navigator.pop(dialogCtx);
+              }
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Profile updated successfully')),
+                );
+              }
+            },
+            child: const Text('Save', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
       ),
     );
   }

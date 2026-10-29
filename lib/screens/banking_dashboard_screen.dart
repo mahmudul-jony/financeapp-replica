@@ -9,6 +9,7 @@ import 'package:financeapp/widgets/summary_card.dart';
 import 'package:financeapp/widgets/quick_actions.dart';
 import 'package:provider/provider.dart';
 import 'package:financeapp/providers/finance_provider.dart';
+import 'package:financeapp/services/auth_service.dart';
 import 'package:financeapp/models/transaction_model.dart';
 import 'package:financeapp/widgets/transaction_item.dart';
 import 'package:financeapp/widgets/update_checker.dart';
@@ -79,18 +80,31 @@ class _BankingDashboardScreenState extends State<BankingDashboardScreen> with Ro
       expenseChangePercentage = 1.0;
     }
 
+    final bool isOffline = provider.isOffline;
+    final List<Color> gradientColors = isOffline
+        ? const [
+            Color(0xFFE2E4E8),
+            Color(0xFFD6D8DC),
+            Color(0xFFCACCD0),
+            Color(0xFFBEBFC4),
+            Color(0xFFB0B2B6),
+          ]
+        : AppColors.dashboardGradient;
+
     return Scaffold(
       backgroundColor: Colors.white,
       body: Stack(
         children: [
-          Container(
-            height: 400,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: AppColors.dashboardGradient,
-                stops: AppColors.dashboardStops,
+          Positioned.fill(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 350),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: gradientColors,
+                  stops: AppColors.dashboardStops,
+                ),
               ),
             ),
           ),
@@ -227,6 +241,10 @@ class DashboardHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final finance = context.watch<FinanceProvider>();
+    final authService = context.watch<AuthService>();
+    final String? photoUrl = authService.photoUrl;
+    final String firstName = authService.firstName;
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -241,31 +259,45 @@ class DashboardHeader extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 24,
-                backgroundColor: AppColors.backgroundWhite,
-                child: ClipOval(
-                  child: Container(
-                    width: 48,
-                    height: 48,
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [AppColors.primaryPurple, Colors.orange],
-                      ),
-                    ),
-                    child: const Icon(Icons.person, color: Colors.white, size: 28),
-                  ),
-                ),
+                backgroundColor: AppColors.softLightPurple,
+                backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
+                    ? NetworkImage(photoUrl)
+                    : null,
+                child: (photoUrl == null || photoUrl.isEmpty)
+                    ? ClipOval(
+                        child: Container(
+                          width: 48,
+                          height: 48,
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [AppColors.primaryPurple, Colors.orange],
+                            ),
+                          ),
+                          child: Center(
+                            child: Text(
+                              firstName.isNotEmpty ? firstName[0].toUpperCase() : 'U',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 20,
+                              ),
+                            ),
+                          ),
+                        ),
+                      )
+                    : null,
               ),
               const SizedBox(width: 12),
-              const Column(
+              Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  const Text(
                     'Welcome Back,',
                     style: AppTypography.caption,
                   ),
-                  SizedBox(height: 0),
+                  const SizedBox(height: 0),
                   Text(
-                    'Hi, Mahmudul',
+                    'Hi, $firstName',
                     style: AppTypography.title,
                   ),
                 ],

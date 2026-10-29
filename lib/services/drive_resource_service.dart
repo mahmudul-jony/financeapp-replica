@@ -48,11 +48,8 @@ class DriveResourceService {
   ];
 
   static const List<String> defaultTabs = [
-    "Pocket",
-    "Bank asia",
+    "Main Wallet",
     "Loans",
-    "Savings",
-    "Investments",
   ];
 
   String? _cachedSpreadsheetId;
@@ -275,20 +272,33 @@ class DriveResourceService {
 
       final List<Map<String, dynamic>> requests = [];
 
-      // If new spreadsheet only has "Sheet1", rename it to "Pocket"
-      if (existingTabs.containsKey("Sheet1") && !existingTabs.containsKey("Pocket")) {
+      // If new spreadsheet only has "Sheet1" or legacy "Pocket", rename to "Main Wallet"
+      if (existingTabs.containsKey("Sheet1") && !existingTabs.containsKey("Main Wallet")) {
         final sheet1Id = existingTabs["Sheet1"]!;
         requests.add({
           "updateSheetProperties": {
             "properties": {
               "sheetId": sheet1Id,
-              "title": "Pocket",
+              "title": "Main Wallet",
             },
             "fields": "title",
           }
         });
         existingTabs.remove("Sheet1");
-        existingTabs["Pocket"] = sheet1Id;
+        existingTabs["Main Wallet"] = sheet1Id;
+      } else if (existingTabs.containsKey("Pocket") && !existingTabs.containsKey("Main Wallet")) {
+        final pocketId = existingTabs["Pocket"]!;
+        requests.add({
+          "updateSheetProperties": {
+            "properties": {
+              "sheetId": pocketId,
+              "title": "Main Wallet",
+            },
+            "fields": "title",
+          }
+        });
+        existingTabs.remove("Pocket");
+        existingTabs["Main Wallet"] = pocketId;
       }
 
       // Add missing tabs from defaultTabs

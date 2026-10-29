@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:path_provider/path_provider.dart';
 import 'drive_resource_service.dart';
 
 class AuthService extends ChangeNotifier {
@@ -26,11 +29,53 @@ class AuthService extends ChangeNotifier {
   bool _isLoading = false;
   String? _errorMessage;
 
+  String? _customFirstName;
+  String? _customLastName;
+  String? _customPhotoUrl;
+
   GoogleSignInAccount? get currentUser => _currentUser;
   bool get isAuthenticated => _currentUser != null;
   bool get isInitializing => _isInitializing;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
+
+  String? get customFirstName => _customFirstName;
+  String? get customLastName => _customLastName;
+  String? get customPhotoUrl => _customPhotoUrl;
+
+  String get firstName {
+    if (_customFirstName != null && _customFirstName!.trim().isNotEmpty) {
+      return _customFirstName!.trim();
+    }
+    final gName = _currentUser?.displayName?.trim() ?? '';
+    if (gName.isNotEmpty) {
+      return gName.split(' ').first;
+    }
+    return 'User';
+  }
+
+  String get lastName {
+    if (_customLastName != null && _customLastName!.trim().isNotEmpty) {
+      return _customLastName!.trim();
+    }
+    final gName = _currentUser?.displayName?.trim() ?? '';
+    if (gName.isNotEmpty) {
+      final parts = gName.split(' ');
+      if (parts.length > 1) {
+        return parts.sublist(1).join(' ');
+      }
+    }
+    return '';
+  }
+
+  String get displayName {
+    final first = firstName;
+    final last = lastName;
+    if (last.isEmpty) return first;
+    return '$first $last';
+  }
+
+  String? get photoUrl => _customPhotoUrl ?? _currentUser?.photoUrl;
 
   StreamSubscription<GoogleSignInAccount?>? _authSubscription;
 
@@ -38,6 +83,8 @@ class AuthService extends ChangeNotifier {
   Future<void> initialize() async {
     _isInitializing = true;
     notifyListeners();
+
+    await _loadCustomProfile();
 
     _authSubscription?.cancel();
     _authSubscription = _googleSignIn.onCurrentUserChanged.listen((account) {
@@ -64,6 +111,45 @@ class AuthService extends ChangeNotifier {
     } finally {
       _isInitializing = false;
       notifyListeners();
+    }
+  }
+
+  Future<void> _loadCustomProfile() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/profile_prefs.json');
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        final data = jsonDecode(content);
+        _customFirstName = data['first_name'] as String?;
+        _customLastName = data['last_name'] as String?;
+        _customPhotoUrl = data['photo_url'] as String?;
+      }
+    } catch (e) {
+      debugPrint("Error loading profile prefs: $e");
+    }
+  }
+
+  Future<void> updateProfile({
+    required String firstName,
+    required String lastName,
+    String? photoUrl,
+  }) async {
+    _customFirstName = firstName.trim();
+    _customLastName = lastName.trim();
+    _customPhotoUrl = photoUrl?.trim();
+    notifyListeners();
+
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/profile_prefs.json');
+      await file.writeAsString(jsonEncode({
+        'first_name': _customFirstName,
+        'last_name': _customLastName,
+        'photo_url': _customPhotoUrl,
+      }));
+    } catch (e) {
+      debugPrint("Error saving profile prefs: $e");
     }
   }
 

@@ -45,7 +45,7 @@ class SyncService {
     if (headers == null || spreadsheetId == null) return false;
 
     try {
-      final targetTab = _determinePrimaryTab(tx.type, walletName);
+      final targetTab = _determinePrimaryTab(tx.type, walletName, secondaryTabName: secondaryTabName);
       final ok1 = await _syncSingleRow(
         headers: headers,
         spreadsheetId: spreadsheetId,
@@ -66,7 +66,7 @@ class SyncService {
           tx: tx,
           titleCategory: titleCategory,
           typeLabel: typeLabel,
-          walletName: secondaryTabName,
+          walletName: walletName,
           action: action,
         );
       }
@@ -78,7 +78,7 @@ class SyncService {
     }
   }
 
-  static String _determinePrimaryTab(TransactionType type, String walletName) {
+  static String _determinePrimaryTab(TransactionType type, String walletName, {String? secondaryTabName}) {
     if (type == TransactionType.loanGiven ||
         type == TransactionType.loanTaken ||
         type == TransactionType.loanGivenMore ||
@@ -90,7 +90,9 @@ class SyncService {
     if (type == TransactionType.savingsCreated ||
         type == TransactionType.savingsIncreased ||
         type == TransactionType.savingsWithdrawal) {
-      return "Savings";
+      return secondaryTabName != null && secondaryTabName.isNotEmpty
+          ? secondaryTabName
+          : (walletName.isNotEmpty && walletName != "N/A" ? walletName : "Savings");
     }
     if (type == TransactionType.investmentCreated ||
         type == TransactionType.investmentIncreased ||
@@ -98,9 +100,11 @@ class SyncService {
         type == TransactionType.investmentWithdraw ||
         type == TransactionType.investmentExpense ||
         type == TransactionType.investmentAdjustment) {
-      return "Investments";
+      return secondaryTabName != null && secondaryTabName.isNotEmpty
+          ? secondaryTabName
+          : (walletName.isNotEmpty && walletName != "N/A" ? walletName : "Investments");
     }
-    return walletName.isNotEmpty ? walletName : "Pocket";
+    return walletName.isNotEmpty && walletName != "N/A" ? walletName : "Main Wallet";
   }
 
   static Future<bool> _syncSingleRow({
@@ -269,7 +273,7 @@ class SyncService {
           final typeLabel = payload['transectionType']?.toString() ?? 'Expense';
           final amount = double.tryParse(payload['amount']?.toString() ?? '0') ?? 0.0;
           final note = payload['note']?.toString() ?? '';
-          final walletName = payload['walletName']?.toString() ?? 'Pocket';
+          final walletName = payload['walletName']?.toString() ?? 'Main Wallet';
           final secTab = payload['secondaryTabName']?.toString();
 
           final tx = TransactionModel(
@@ -543,12 +547,8 @@ class SyncService {
     }
   }
 
-  static Future<bool> updateWalletName(String oldName, String newName) => renameTab(oldName, newName);
-
-  static Future<bool> updateCategoryName(String oldName, String newName) async => true;
-
-  /// Clears all data rows (row 2 downwards) in all tabs, preserving headers in row 1
-  static Future<bool> resetSheet() async {
+  /// Deletes a sheet tab by name
+  static Future<bool> deleteTab(String tabName) async {
     final headers = await AuthService().getAuthHeaders();
     final spreadsheetId = await DriveResourceService.instance.getSpreadsheetId();
     if (headers == null || spreadsheetId == null) return false;
@@ -560,26 +560,155 @@ class SyncService {
 
       final metaData = jsonDecode(metaRes.body);
       final List sheets = metaData['sheets'] ?? [];
-      final List<String> rangesToClear = [];
+      int? sheetIdToDelete;
       for (var s in sheets) {
-        final title = s['properties']?['title']?.toString();
-        if (title != null && title.isNotEmpty) {
-          rangesToClear.add("'$title'!A2:G");
+        if (s['properties']?['title']?.toString() == tabName) {
+          sheetIdToDelete = s['properties']['sheetId'] as int;
+          break;
         }
       }
 
-      if (rangesToClear.isNotEmpty) {
-        final clearUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId/values:batchClear");
-        final clearRes = await http.post(
-          clearUri,
+      if (sheetIdToDelete == null) return true; // Already deleted or doesn't exist
+
+      // A spreadsheet must contain at least 1 sheet
+      if (sheets.length <= 1) return false;
+
+      final batchUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId:batchUpdate");
+      final deleteRes = await http.post(
+        batchUri,
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+        },
+        body: jsonEncode({
+          "requests": [
+            {
+              "deleteSheet": {
+                "sheetId": sheetIdToDelete,
+              }
+            }
+          ]
+        }),
+      ).timeout(const Duration(seconds: 15));
+      return deleteRes.statusCode == 200;
+    } catch (e) {
+      debugPrint("Delete Tab Error: $e");
+      return false;
+    }
+  }
+
+  /// Replaces text across all cells in all tabs of the spreadsheet using findReplace
+  static Future<bool> replaceTextInSpreadsheet({
+    required String find,
+    required String replacement,
+    bool matchEntireCell = true,
+  }) async {
+    if (find.isEmpty || find == replacement) return true;
+    final headers = await AuthService().getAuthHeaders();
+    final spreadsheetId = await DriveResourceService.instance.getSpreadsheetId();
+    if (headers == null || spreadsheetId == null) return false;
+
+    try {
+      final batchUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId:batchUpdate");
+      final res = await http.post(
+        batchUri,
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+        },
+        body: jsonEncode({
+          "requests": [
+            {
+              "findReplace": {
+                "find": find,
+                "replacement": replacement,
+                "matchCase": false,
+                "matchEntireCell": matchEntireCell,
+                "allSheets": true,
+              }
+            }
+          ]
+        }),
+      ).timeout(const Duration(seconds: 15));
+      return res.statusCode == 200;
+    } catch (e) {
+      debugPrint("replaceTextInSpreadsheet Error: $e");
+      return false;
+    }
+  }
+
+  static Future<bool> updateWalletName(String oldName, String newName) async {
+    final renamed = await renameTab(oldName, newName);
+    final replaced = await replaceTextInSpreadsheet(find: oldName, replacement: newName, matchEntireCell: true);
+    return renamed || replaced;
+  }
+
+  static Future<bool> updateCategoryName(String oldName, String newName) async {
+    return await replaceTextInSpreadsheet(find: oldName, replacement: newName, matchEntireCell: true);
+  }
+
+  /// Wipes all non-default tabs and clears all transaction rows (row 2 downwards),
+  /// leaving only default tabs ('Main Wallet', 'Loans') with row 1 headers.
+  static Future<bool> resetSheet({String defaultWalletName = "Main Wallet"}) async {
+    final headers = await AuthService().getAuthHeaders();
+    final spreadsheetId = await DriveResourceService.instance.getSpreadsheetId();
+    if (headers == null || spreadsheetId == null) return false;
+
+    try {
+      final metaUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId?fields=sheets.properties(sheetId,title)");
+      final metaRes = await http.get(metaUri, headers: headers).timeout(const Duration(seconds: 12));
+      if (metaRes.statusCode != 200) return false;
+
+      final metaData = jsonDecode(metaRes.body);
+      final List sheets = metaData['sheets'] ?? [];
+      final Set<String> keepTabs = {defaultWalletName, "Loans"};
+
+      // Ensure default tabs exist first before deleting others
+      for (var tab in keepTabs) {
+        await createTab(tab);
+      }
+
+      // Re-fetch sheet list to get up-to-date IDs
+      final updatedMetaRes = await http.get(metaUri, headers: headers).timeout(const Duration(seconds: 12));
+      final List updatedSheets = (updatedMetaRes.statusCode == 200)
+          ? (jsonDecode(updatedMetaRes.body)['sheets'] ?? [])
+          : sheets;
+
+      final List<Map<String, dynamic>> deleteRequests = [];
+      for (var s in updatedSheets) {
+        final title = s['properties']?['title']?.toString();
+        final sheetId = s['properties']?['sheetId'] as int?;
+        if (title != null && !keepTabs.contains(title) && sheetId != null) {
+          deleteRequests.add({
+            "deleteSheet": {"sheetId": sheetId}
+          });
+        }
+      }
+
+      if (deleteRequests.isNotEmpty) {
+        final batchUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId:batchUpdate");
+        await http.post(
+          batchUri,
           headers: {
             ...headers,
             "Content-Type": "application/json",
           },
-          body: jsonEncode({"ranges": rangesToClear}),
+          body: jsonEncode({"requests": deleteRequests}),
         ).timeout(const Duration(seconds: 15));
-        return clearRes.statusCode == 200;
       }
+
+      // Clear all rows from row 2 downwards in remaining default tabs
+      final List<String> rangesToClear = keepTabs.map((t) => "'$t'!A2:G").toList();
+      final clearUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId/values:batchClear");
+      await http.post(
+        clearUri,
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+        },
+        body: jsonEncode({"ranges": rangesToClear}),
+      ).timeout(const Duration(seconds: 15));
+
       return true;
     } catch (e) {
       debugPrint("Reset Sheet Error: $e");

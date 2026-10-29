@@ -35,6 +35,14 @@ void main() {
       expect(scopes, isNot(contains('https://www.googleapis.com/auth/drive')));
     });
 
+    test('Default tabs strictly match Main Wallet and Loans only', () {
+      expect(DriveResourceService.defaultTabs, equals(['Main Wallet', 'Loans']));
+      expect(DriveResourceService.defaultTabs, isNot(contains('Pocket')));
+      expect(DriveResourceService.defaultTabs, isNot(contains('Bank asia')));
+      expect(DriveResourceService.defaultTabs, isNot(contains('Savings')));
+      expect(DriveResourceService.defaultTabs, isNot(contains('Investments')));
+    });
+
     test('DriveResourceResult encapsulates success, IDs, and error message', () {
       const resSuccess = DriveResourceResult(
         isSuccess: true,
