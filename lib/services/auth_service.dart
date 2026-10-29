@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:path_provider/path_provider.dart';
 import 'drive_resource_service.dart';
@@ -76,6 +76,20 @@ class AuthService extends ChangeNotifier {
   }
 
   String? get photoUrl => _customPhotoUrl ?? _currentUser?.photoUrl;
+
+  ImageProvider? get avatarImageProvider {
+    final url = photoUrl;
+    if (url == null || url.trim().isEmpty) return null;
+    final path = url.trim();
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return NetworkImage(path);
+    }
+    final file = File(path);
+    if (file.existsSync()) {
+      return FileImage(file);
+    }
+    return null;
+  }
 
   StreamSubscription<GoogleSignInAccount?>? _authSubscription;
 

@@ -47,8 +47,18 @@ class AppColors {
 
   // --- ৫. ড্যাশবোর্ড গ্রেডিয়েন্ট (Visual Flair) ---
   static const dashboardGradient = [
-    Color(0xFFF6F8FC), Color(0xFFEEE9FF), Color(0xFFE0DCFF), Color(0xFFD6D0FF), Color(
-        0xFFD1BFFF),
+    Color(0xFFEBF3FE),
+    Color(0xFFD6E8FE),
+    Color(0xFFB8D8FD),
+    Color(0xFF94C4FC),
+    Color(0xFF6EAEFA),
+  ];
+  static const dashboardOfflineGradient = [
+    Color(0xFFF0F0F0),
+    Color(0xFFDCDCDC),
+    Color(0xFFBEBEBE),
+    Color(0xFFA0A0A0),
+    Color(0xFF808080),
   ];
   static const dashboardStops = [0.0, 0.35, 0.65, 0.85, 1.0];
 

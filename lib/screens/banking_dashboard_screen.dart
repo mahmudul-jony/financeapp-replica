@@ -82,13 +82,7 @@ class _BankingDashboardScreenState extends State<BankingDashboardScreen> with Ro
 
     final bool isOffline = provider.isOffline;
     final List<Color> gradientColors = isOffline
-        ? const [
-            Color(0xFFE2E4E8),
-            Color(0xFFD6D8DC),
-            Color(0xFFCACCD0),
-            Color(0xFFBEBFC4),
-            Color(0xFFB0B2B6),
-          ]
+        ? AppColors.dashboardOfflineGradient
         : AppColors.dashboardGradient;
 
     return Scaffold(
@@ -242,7 +236,6 @@ class DashboardHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final finance = context.watch<FinanceProvider>();
     final authService = context.watch<AuthService>();
-    final String? photoUrl = authService.photoUrl;
     final String firstName = authService.firstName;
 
     return Row(
@@ -260,10 +253,8 @@ class DashboardHeader extends StatelessWidget {
               CircleAvatar(
                 radius: 24,
                 backgroundColor: AppColors.softLightPurple,
-                backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
-                    ? NetworkImage(photoUrl)
-                    : null,
-                child: (photoUrl == null || photoUrl.isEmpty)
+                backgroundImage: authService.avatarImageProvider,
+                child: authService.avatarImageProvider == null
                     ? ClipOval(
                         child: Container(
                           width: 48,

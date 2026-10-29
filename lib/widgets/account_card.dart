@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:financeapp/app_constants.dart';
 import 'package:financeapp/models/account_model.dart';
-import 'package:financeapp/widgets/custom_painters.dart';
 
 class AccountCard extends StatelessWidget {
   final AccountCardData data;
@@ -65,13 +64,6 @@ class AccountCard extends StatelessWidget {
                       ),
                     ),
                   ],
-                ),
-              ),
-              SizedBox(
-                width: 46,
-                height: 46,
-                child: CustomPaint(
-                  painter: BrandMarkPainter(accent: data.accent),
                 ),
               ),
             ],

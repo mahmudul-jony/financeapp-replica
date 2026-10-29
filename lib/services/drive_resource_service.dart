@@ -48,7 +48,7 @@ class DriveResourceService {
   ];
 
   static const List<String> defaultTabs = [
-    "Main Wallet",
+    "Wallet-Main Wallet",
     "Loans",
   ];
 
@@ -272,46 +272,93 @@ class DriveResourceService {
 
       final List<Map<String, dynamic>> requests = [];
 
-      // If new spreadsheet only has "Sheet1" or legacy "Pocket", rename to "Main Wallet"
-      if (existingTabs.containsKey("Sheet1") && !existingTabs.containsKey("Main Wallet")) {
-        final sheet1Id = existingTabs["Sheet1"]!;
+      int? defaultWalletSheetId;
+      if (existingTabs.containsKey("Wallet-Main Wallet")) {
+        defaultWalletSheetId = existingTabs["Wallet-Main Wallet"];
+      } else if (existingTabs.containsKey("Main Wallet")) {
+        defaultWalletSheetId = existingTabs["Main Wallet"];
         requests.add({
           "updateSheetProperties": {
             "properties": {
-              "sheetId": sheet1Id,
-              "title": "Main Wallet",
+              "sheetId": defaultWalletSheetId,
+              "title": "Wallet-Main Wallet",
+              "index": 0,
             },
-            "fields": "title",
+            "fields": "title,index",
           }
         });
-        existingTabs.remove("Sheet1");
-        existingTabs["Main Wallet"] = sheet1Id;
-      } else if (existingTabs.containsKey("Pocket") && !existingTabs.containsKey("Main Wallet")) {
-        final pocketId = existingTabs["Pocket"]!;
+        existingTabs.remove("Main Wallet");
+        existingTabs["Wallet-Main Wallet"] = defaultWalletSheetId!;
+      } else if (existingTabs.containsKey("Pocket")) {
+        defaultWalletSheetId = existingTabs["Pocket"];
         requests.add({
           "updateSheetProperties": {
             "properties": {
-              "sheetId": pocketId,
-              "title": "Main Wallet",
+              "sheetId": defaultWalletSheetId,
+              "title": "Wallet-Main Wallet",
+              "index": 0,
             },
-            "fields": "title",
+            "fields": "title,index",
           }
         });
         existingTabs.remove("Pocket");
-        existingTabs["Main Wallet"] = pocketId;
+        existingTabs["Wallet-Main Wallet"] = defaultWalletSheetId!;
+      } else if (existingTabs.containsKey("Sheet1")) {
+        defaultWalletSheetId = existingTabs["Sheet1"];
+        requests.add({
+          "updateSheetProperties": {
+            "properties": {
+              "sheetId": defaultWalletSheetId,
+              "title": "Wallet-Main Wallet",
+              "index": 0,
+            },
+            "fields": "title,index",
+          }
+        });
+        existingTabs.remove("Sheet1");
+        existingTabs["Wallet-Main Wallet"] = defaultWalletSheetId!;
+      }
+
+      // Ensure default wallet is index 0
+      if (defaultWalletSheetId != null && !requests.any((r) => r["updateSheetProperties"]?["properties"]?["sheetId"] == defaultWalletSheetId)) {
+        requests.add({
+          "updateSheetProperties": {
+            "properties": {
+              "sheetId": defaultWalletSheetId,
+              "index": 0,
+            },
+            "fields": "index",
+          }
+        });
       }
 
       // Add missing tabs from defaultTabs
       for (var tab in defaultTabs) {
         if (!existingTabs.containsKey(tab)) {
+          final targetIndex = tab == "Wallet-Main Wallet" ? 0 : 1;
           requests.add({
             "addSheet": {
               "properties": {
                 "title": tab,
+                "index": targetIndex,
               }
             }
           });
         }
+      }
+
+      // Ensure Loans is at index 1 if it exists
+      if (existingTabs.containsKey("Loans")) {
+        final loansId = existingTabs["Loans"]!;
+        requests.add({
+          "updateSheetProperties": {
+            "properties": {
+              "sheetId": loansId,
+              "index": 1,
+            },
+            "fields": "index",
+          }
+        });
       }
 
       if (requests.isNotEmpty) {

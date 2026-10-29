@@ -18,13 +18,16 @@ class SummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    double totalAvailableBeforeExpense = totalWithdrawable + totalExpense;
-    double expenseRatio = totalAvailableBeforeExpense > 0 
+    final double totalAvailableBeforeExpense = totalWithdrawable + totalExpense;
+    final double expenseRatio = totalAvailableBeforeExpense > 0 
         ? (totalExpense / totalAvailableBeforeExpense).clamp(0.0, 1.0) 
         : 0.0;
     
     final now = DateTime.now();
-    final monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    final monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June', 
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
     final String currentMonthYear = "${monthNames[now.month - 1]}, ${now.year}";
 
     double validPercentage = expenseChangePercentage;
@@ -41,12 +44,12 @@ class SummaryCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.cardBackground,
-        borderRadius: AppRadius.borderRadiusLarge,
+        borderRadius: BorderRadius.circular(28),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 25,
-            offset: const Offset(0, 12),
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 24,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
@@ -54,159 +57,181 @@ class SummaryCard extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTapDashboard,
-          borderRadius: AppRadius.borderRadiusLarge,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 28, 24, 16),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Withdrawable Balance',
-                            style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w400),
-                          ),
-                          const SizedBox(height: 2),
-                          FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              AppFormat.currency(totalWithdrawable),
+          borderRadius: BorderRadius.circular(28),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 22),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Left Side Content
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        // Top Section: Withdrawable Balance
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Withdrawable Balance',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w400,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                AppFormat.currency(totalWithdrawable),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 34,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: -0.5,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        // Bottom Section: Date, Expense, vs last week
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              currentMonthYear,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w400,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              'Total Expanse ${AppFormat.currency(totalExpense)}',
                               style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 38,
-                                fontWeight: FontWeight.w500,
-                                letterSpacing: -0.5,
+                                fontSize: 15.5,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            currentMonthYear,
-                            style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w400),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Total Expense ${AppFormat.currency(totalExpense)}',
-                            style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Icon(
-                                isMoreExpense ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
-                                color: indicatorColor,
-                                size: 15,
+                            const SizedBox(height: 4),
+                            Text.rich(
+                              TextSpan(
+                                children: [
+                                  TextSpan(
+                                    text: "$percentStr% ${isMoreExpense ? '↑' : '↓'} ",
+                                    style: TextStyle(
+                                      color: indicatorColor,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const TextSpan(
+                                    text: "vs last week",
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w400,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 4),
-                              Text(
-                                "$percentStr%",
-                                style: TextStyle(
-                                  color: indicatorColor,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const Text(
-                                " vs last week",
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w400,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                    SizedBox(
-                      width: 90,
-                      height: 90,
-                      child: Stack(
-                        children: [
-                          Center(
-                            child: CustomPaint(
-                              size: const Size(90, 90),
+                  ),
+                  const SizedBox(width: 14),
+                  // Right Side Content: Donut Chart & Dashboard Link
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Donut Chart
+                      SizedBox(
+                        width: 105,
+                        height: 105,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            CustomPaint(
+                              size: const Size(105, 105),
                               painter: DonutChartPainter(
                                 percentage: expenseRatio,
-                                color: AppColors.incomeGreen,
-                                backgroundColor: Colors.white.withOpacity(0.1),
+                                color: const Color(0xFF00A644),
+                                backgroundColor: const Color(0xFF3C3737),
+                                strokeWidth: 8,
                               ),
                             ),
-                          ),
-                          Center(
-                            child: Column(
+                            Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Text(
                                   "${(expenseRatio * 100).toInt()}%",
-                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 22,
+                                  ),
                                 ),
+                                const SizedBox(height: 2),
                                 const Text(
-                                  "Expense",
-                                  style: TextStyle(color: Colors.white70, fontSize: 10),
+                                  "Expanse of\nincome",
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10.5,
+                                    height: 1.15,
+                                    fontWeight: FontWeight.w400,
+                                  ),
                                 ),
                               ],
                             ),
+                          ],
+                        ),
+                      ),
+                      // Dashboard Action
+                      InkWell(
+                        onTap: onTapDashboard,
+                        borderRadius: BorderRadius.circular(8),
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Dashboard',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              SizedBox(width: 6),
+                              Icon(
+                                Icons.arrow_forward_rounded,
+                                color: Colors.white,
+                                size: 17,
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              // Dashed Divider
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: CustomPaint(
-                  size: const Size(double.infinity, 1),
-                  painter: DashedLinePainter(color: Colors.white.withOpacity(0.1)),
-                ),
-              ),
-              // Dashboard Button at the bottom
-              if (onTapDashboard != null)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                  child: Row(
-                    children: [
-                      const Text(
-                        'Dashboard',
-                        style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
-                      ),
-                      const SizedBox(width: 8),
-                      const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 16),
                     ],
                   ),
-                ),
-            ],
+                ],
+              ),
+            ),
           ),
         ),
       ),
     );
   }
-}
-
-class DashedLinePainter extends CustomPainter {
-  final Color color;
-  DashedLinePainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    double dashWidth = 5, dashSpace = 3, startX = 0;
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 1;
-    while (startX < size.width) {
-      canvas.drawLine(Offset(startX, 0), Offset(startX + dashWidth, 0), paint);
-      startX += dashWidth + dashSpace;
-    }
-  }
-
-  @override
-  bool shouldRepaint(CustomPainter oldDelegate) => false;
 }

@@ -200,31 +200,44 @@ class DonutChartPainter extends CustomPainter {
   final double percentage;
   final Color color;
   final Color? backgroundColor;
-  const DonutChartPainter({required this.percentage, required this.color, this.backgroundColor});
+  final double strokeWidth;
+
+  const DonutChartPainter({
+    required this.percentage,
+    required this.color,
+    this.backgroundColor,
+    this.strokeWidth = 8.0,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2;
+    final radius = (size.width - strokeWidth) / 2;
     
     final bgPaint = Paint()
       ..color = backgroundColor ?? AppColors.borderGrey
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 8;
+      ..strokeWidth = strokeWidth;
 
     final progressPaint = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 8
+      ..strokeWidth = strokeWidth
       ..strokeCap = StrokeCap.round;
 
     canvas.drawCircle(center, radius, bgPaint);
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      -math.pi / 2, 2 * math.pi * percentage, false, progressPaint,
-    );
+    if (percentage > 0) {
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        -math.pi / 2, 2 * math.pi * percentage.clamp(0.0, 1.0), false, progressPaint,
+      );
+    }
   }
 
   @override
-  bool shouldRepaint(covariant DonutChartPainter oldDelegate) => oldDelegate.percentage != percentage;
+  bool shouldRepaint(covariant DonutChartPainter oldDelegate) =>
+      oldDelegate.percentage != percentage ||
+      oldDelegate.color != color ||
+      oldDelegate.backgroundColor != backgroundColor ||
+      oldDelegate.strokeWidth != strokeWidth;
 }

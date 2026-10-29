@@ -31,6 +31,86 @@ class SyncService {
     return spreadsheetId != null && spreadsheetId.isNotEmpty;
   }
 
+  static String walletTabName(String walletName) {
+    final trimmed = walletName.trim();
+    if (trimmed.startsWith('Wallet-')) return trimmed;
+    return 'Wallet-$trimmed';
+  }
+
+  static String savingsTabName(String savingsName) {
+    final trimmed = savingsName.trim();
+    if (trimmed.startsWith('Saving-')) return trimmed;
+    return 'Saving-$trimmed';
+  }
+
+  static String investmentTabName(String investmentName) {
+    final trimmed = investmentName.trim();
+    if (trimmed.startsWith('Invest-')) return trimmed;
+    return 'Invest-$trimmed';
+  }
+
+  static const String loansTabName = 'Loans';
+
+  static String stripTabPrefix(String tabName) {
+    final trimmed = tabName.trim();
+    if (trimmed.startsWith('Wallet-')) return trimmed.substring('Wallet-'.length);
+    if (trimmed.startsWith('Saving-')) return trimmed.substring('Saving-'.length);
+    if (trimmed.startsWith('Invest-')) return trimmed.substring('Invest-'.length);
+    return trimmed;
+  }
+
+  static List<String> getTabsForTransaction(TransactionType type, String walletName, {String? secondaryTabName}) {
+    final List<String> tabs = [];
+
+    final wName = walletName.trim();
+    final sName = secondaryTabName?.trim();
+
+    if (type == TransactionType.transfer) {
+      if (wName.isNotEmpty && wName != 'N/A') {
+        tabs.add(walletTabName(wName));
+      }
+      if (sName != null && sName.isNotEmpty && sName != 'N/A' && sName.toLowerCase() != wName.toLowerCase()) {
+        tabs.add(walletTabName(sName));
+      }
+    } else if (type == TransactionType.loanGiven ||
+        type == TransactionType.loanTaken ||
+        type == TransactionType.loanGivenMore ||
+        type == TransactionType.loanTakenMore ||
+        type == TransactionType.loanRecovered ||
+        type == TransactionType.loanRepaid) {
+      tabs.add(loansTabName);
+      if (wName.isNotEmpty && wName != 'N/A' && wName != 'Loans') {
+        tabs.add(walletTabName(wName));
+      }
+    } else if (type == TransactionType.savingsCreated ||
+        type == TransactionType.savingsIncreased ||
+        type == TransactionType.savingsWithdrawal) {
+      if (sName != null && sName.isNotEmpty) {
+        tabs.add(savingsTabName(sName));
+      }
+      if (wName.isNotEmpty && wName != 'N/A' && wName != 'Savings') {
+        tabs.add(walletTabName(wName));
+      }
+    } else if (type == TransactionType.investmentCreated ||
+        type == TransactionType.investmentIncreased ||
+        type == TransactionType.investmentProfit ||
+        type == TransactionType.investmentWithdraw ||
+        type == TransactionType.investmentExpense ||
+        type == TransactionType.investmentAdjustment) {
+      if (sName != null && sName.isNotEmpty) {
+        tabs.add(investmentTabName(sName));
+      }
+      if (wName.isNotEmpty && wName != 'N/A' && wName != 'Investments' && wName != 'Investment Principal') {
+        tabs.add(walletTabName(wName));
+      }
+    } else {
+      final targetWallet = (wName.isNotEmpty && wName != 'N/A') ? wName : 'Main Wallet';
+      tabs.add(walletTabName(targetWallet));
+    }
+
+    return tabs.toSet().toList();
+  }
+
   /// Synchronizes a single transaction directly to the user's Google Sheet
   static Future<bool> syncTransaction(
     TransactionModel tx, 
@@ -44,67 +124,31 @@ class SyncService {
     final spreadsheetId = await DriveResourceService.instance.getSpreadsheetId();
     if (headers == null || spreadsheetId == null) return false;
 
-    try {
-      final targetTab = _determinePrimaryTab(tx.type, walletName, secondaryTabName: secondaryTabName);
-      final ok1 = await _syncSingleRow(
-        headers: headers,
-        spreadsheetId: spreadsheetId,
-        tabName: targetTab,
-        tx: tx,
-        titleCategory: titleCategory,
-        typeLabel: typeLabel,
-        walletName: walletName,
-        action: action,
-      );
+    if (action == 'delete') {
+      return await deleteTransaction(tx.syncId);
+    }
 
-      bool ok2 = true;
-      if (secondaryTabName != null && secondaryTabName.isNotEmpty && secondaryTabName != targetTab) {
-        ok2 = await _syncSingleRow(
+    try {
+      final targetTabs = getTabsForTransaction(tx.type, walletName, secondaryTabName: secondaryTabName);
+      bool allSuccess = true;
+      for (var tab in targetTabs) {
+        final ok = await _syncSingleRow(
           headers: headers,
           spreadsheetId: spreadsheetId,
-          tabName: secondaryTabName,
+          tabName: tab,
           tx: tx,
           titleCategory: titleCategory,
           typeLabel: typeLabel,
           walletName: walletName,
           action: action,
         );
+        if (!ok) allSuccess = false;
       }
-
-      return ok1 && ok2;
+      return allSuccess;
     } catch (e) {
       debugPrint("Direct Sheet syncTransaction Error: $e");
       return false;
     }
-  }
-
-  static String _determinePrimaryTab(TransactionType type, String walletName, {String? secondaryTabName}) {
-    if (type == TransactionType.loanGiven ||
-        type == TransactionType.loanTaken ||
-        type == TransactionType.loanGivenMore ||
-        type == TransactionType.loanTakenMore ||
-        type == TransactionType.loanRecovered ||
-        type == TransactionType.loanRepaid) {
-      return "Loans";
-    }
-    if (type == TransactionType.savingsCreated ||
-        type == TransactionType.savingsIncreased ||
-        type == TransactionType.savingsWithdrawal) {
-      return secondaryTabName != null && secondaryTabName.isNotEmpty
-          ? secondaryTabName
-          : (walletName.isNotEmpty && walletName != "N/A" ? walletName : "Savings");
-    }
-    if (type == TransactionType.investmentCreated ||
-        type == TransactionType.investmentIncreased ||
-        type == TransactionType.investmentProfit ||
-        type == TransactionType.investmentWithdraw ||
-        type == TransactionType.investmentExpense ||
-        type == TransactionType.investmentAdjustment) {
-      return secondaryTabName != null && secondaryTabName.isNotEmpty
-          ? secondaryTabName
-          : (walletName.isNotEmpty && walletName != "N/A" ? walletName : "Investments");
-    }
-    return walletName.isNotEmpty && walletName != "N/A" ? walletName : "Main Wallet";
   }
 
   static Future<bool> _syncSingleRow({
@@ -140,7 +184,8 @@ class SyncService {
 
     if (existingRowIndex != null) {
       // Update existing row
-      final updateUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId/values/'$tabName'!A$existingRowIndex:G$existingRowIndex?valueInputOption=USER_ENTERED");
+      final range = Uri.encodeComponent("'$tabName'!A$existingRowIndex:G$existingRowIndex");
+      final updateUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId/values/$range?valueInputOption=USER_ENTERED");
       final res = await http.put(
         updateUri,
         headers: {
@@ -152,7 +197,8 @@ class SyncService {
       return res.statusCode == 200;
     } else {
       // Append new row
-      final appendUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId/values/'$tabName'!A:G:append?valueInputOption=USER_ENTERED");
+      final range = Uri.encodeComponent("'$tabName'!A:G");
+      final appendUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId/values/$range:append?valueInputOption=USER_ENTERED");
       final res = await http.post(
         appendUri,
         headers: {
@@ -172,7 +218,8 @@ class SyncService {
     String syncId,
   ) async {
     try {
-      final uri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId/values/'$tabName'!A:A");
+      final range = Uri.encodeComponent("'$tabName'!A:A");
+      final uri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId/values/$range");
       final res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -215,6 +262,8 @@ class SyncService {
         final rowIndex = await _findRowIndexById(headers, spreadsheetId, title, syncId);
         if (rowIndex != null && rowIndex > 1) { // Never delete row 1 header
           deleteRequests.add({
+            "_sheetId": sheetId,
+            "_startIndex": rowIndex - 1,
             "deleteDimension": {
               "range": {
                 "sheetId": sheetId,
@@ -228,6 +277,12 @@ class SyncService {
       }
 
       if (deleteRequests.isNotEmpty) {
+        // Sort descending by startIndex so row indices don't shift when deleting in same sheet
+        deleteRequests.sort((a, b) => (b['_startIndex'] as int).compareTo(a['_startIndex'] as int));
+        final cleanRequests = deleteRequests.map((r) => {
+          "deleteDimension": r["deleteDimension"],
+        }).toList();
+
         final batchUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId:batchUpdate");
         final batchRes = await http.post(
           batchUri,
@@ -235,7 +290,7 @@ class SyncService {
             ...headers,
             "Content-Type": "application/json",
           },
-          body: jsonEncode({"requests": deleteRequests}),
+          body: jsonEncode({"requests": cleanRequests}),
         ).timeout(const Duration(seconds: 15));
         return batchRes.statusCode == 200;
       }
@@ -393,7 +448,8 @@ class SyncService {
           final typeLabel = row.length > 3 ? row[3]?.toString() ?? 'Expense' : 'Expense';
           final amount = row.length > 4 ? (double.tryParse(row[4]?.toString() ?? '0') ?? 0.0) : 0.0;
           final note = row.length > 5 ? row[5]?.toString() ?? '' : '';
-          final walletName = row.length > 6 ? row[6]?.toString() ?? tabName : tabName;
+          final rawWallet = row.length > 6 ? (row[6]?.toString() ?? tabName) : tabName;
+          final walletName = stripTabPrefix(rawWallet);
 
           final record = {
             'id': id,
@@ -476,7 +532,8 @@ class SyncService {
 
       if (addRes.statusCode == 200) {
         // Write header row
-        final headerUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId/values/'$tabName'!A1:G1?valueInputOption=USER_ENTERED");
+        final range = Uri.encodeComponent("'$tabName'!A1:G1");
+        final headerUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId/values/$range?valueInputOption=USER_ENTERED");
         await http.put(
           headerUri,
           headers: {
@@ -511,7 +568,8 @@ class SyncService {
       final List sheets = metaData['sheets'] ?? [];
       int? sheetIdToRename;
       for (var s in sheets) {
-        if (s['properties']?['title']?.toString() == oldTabName) {
+        final title = s['properties']?['title']?.toString();
+        if (title == oldTabName || (title != null && stripTabPrefix(title) == stripTabPrefix(oldTabName))) {
           sheetIdToRename = s['properties']['sheetId'] as int;
           break;
         }
@@ -562,7 +620,8 @@ class SyncService {
       final List sheets = metaData['sheets'] ?? [];
       int? sheetIdToDelete;
       for (var s in sheets) {
-        if (s['properties']?['title']?.toString() == tabName) {
+        final title = s['properties']?['title']?.toString();
+        if (title == tabName || (title != null && stripTabPrefix(title) == stripTabPrefix(tabName))) {
           sheetIdToDelete = s['properties']['sheetId'] as int;
           break;
         }
@@ -638,7 +697,9 @@ class SyncService {
   }
 
   static Future<bool> updateWalletName(String oldName, String newName) async {
-    final renamed = await renameTab(oldName, newName);
+    final oldTab = walletTabName(oldName);
+    final newTab = walletTabName(newName);
+    final renamed = await renameTab(oldTab, newTab);
     final replaced = await replaceTextInSpreadsheet(find: oldName, replacement: newName, matchEntireCell: true);
     return renamed || replaced;
   }
@@ -647,9 +708,13 @@ class SyncService {
     return await replaceTextInSpreadsheet(find: oldName, replacement: newName, matchEntireCell: true);
   }
 
+  static Future<bool> clearCategoryName(String categoryName) async {
+    return await replaceTextInSpreadsheet(find: categoryName, replacement: "-", matchEntireCell: true);
+  }
+
   /// Wipes all non-default tabs and clears all transaction rows (row 2 downwards),
-  /// leaving only default tabs ('Main Wallet', 'Loans') with row 1 headers.
-  static Future<bool> resetSheet({String defaultWalletName = "Main Wallet"}) async {
+  /// leaving only default tabs ('Wallet-Main Wallet', 'Loans') with row 1 headers.
+  static Future<bool> resetSheet({String defaultWalletName = "Wallet-Main Wallet"}) async {
     final headers = await AuthService().getAuthHeaders();
     final spreadsheetId = await DriveResourceService.instance.getSpreadsheetId();
     if (headers == null || spreadsheetId == null) return false;
@@ -661,7 +726,8 @@ class SyncService {
 
       final metaData = jsonDecode(metaRes.body);
       final List sheets = metaData['sheets'] ?? [];
-      final Set<String> keepTabs = {defaultWalletName, "Loans"};
+      final defTab = walletTabName(defaultWalletName);
+      final Set<String> keepTabs = {defTab, "Loans"};
 
       // Ensure default tabs exist first before deleting others
       for (var tab in keepTabs) {

@@ -27,22 +27,11 @@ class CategorySelectionScreen extends StatelessWidget {
             separatorBuilder: (context, index) => const Divider(height: 1, color: AppColors.borderGrey),
             itemBuilder: (context, index) {
               final category = categories[index];
-              
-              // Map icon code back to Icons for tree shaking compatibility
-              IconData categoryIcon;
-              switch (category.iconCode) {
-                case 0xe1af: categoryIcon = Icons.payments_rounded; break;
-                case 0xe25a: categoryIcon = Icons.restaurant_rounded; break;
-                case 0xe1d1: categoryIcon = Icons.directions_bus_rounded; break;
-                case 0xe59c: categoryIcon = Icons.shopping_cart_rounded; break;
-                default: categoryIcon = Icons.category_rounded;
-              }
 
               return Container(
                 color: Colors.white,
                 child: ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 0),
-                  leading: Icon(categoryIcon),
                   title: Text(category.name, style: AppTypography.body),
                   onTap: () => Navigator.pop(context, category),
                 ),

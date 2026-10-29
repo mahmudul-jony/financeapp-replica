@@ -1,4 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:financeapp/app_constants.dart';
 import 'package:financeapp/screens/signin_screen.dart';
 import 'package:financeapp/services/auth_service.dart';
@@ -47,7 +50,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final String email = (authService.currentUser?.email != null && authService.currentUser!.email.isNotEmpty)
         ? authService.currentUser!.email
         : 'mahmudul@example.com';
-    final String? photoUrl = authService.photoUrl;
 
     return Column(
       children: [
@@ -57,10 +59,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             CircleAvatar(
               radius: 50,
               backgroundColor: AppColors.softLightPurple,
-              backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
-                  ? NetworkImage(photoUrl)
-                  : null,
-              child: (photoUrl == null || photoUrl.isEmpty)
+              backgroundImage: authService.avatarImageProvider,
+              child: authService.avatarImageProvider == null
                   ? const Icon(Icons.person_rounded, size: 60, color: AppColors.primaryPurple)
                   : null,
             ),
@@ -237,86 +237,163 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _showEditProfileDialog(BuildContext context, AuthService authService) {
     final firstCtrl = TextEditingController(text: authService.firstName);
     final lastCtrl = TextEditingController(text: authService.lastName);
-    final photoCtrl = TextEditingController(text: authService.customPhotoUrl ?? authService.currentUser?.photoUrl ?? '');
+    String? selectedPhotoPath = authService.customPhotoUrl;
 
     showDialog(
       context: context,
-      builder: (dialogCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Text('Edit Profile', style: AppTypography.title),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: firstCtrl,
-                decoration: InputDecoration(
-                  labelText: 'First Name',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  prefixIcon: const Icon(Icons.person_outline_rounded),
-                ),
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          ImageProvider? currentAvatar;
+          if (selectedPhotoPath != null && selectedPhotoPath!.isNotEmpty) {
+            if (selectedPhotoPath!.startsWith('http://') || selectedPhotoPath!.startsWith('https://')) {
+              currentAvatar = NetworkImage(selectedPhotoPath!);
+            } else {
+              final f = File(selectedPhotoPath!);
+              if (f.existsSync()) {
+                currentAvatar = FileImage(f);
+              }
+            }
+          } else if (authService.currentUser?.photoUrl != null) {
+            currentAvatar = NetworkImage(authService.currentUser!.photoUrl!);
+          }
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            title: const Text('Edit Profile', style: AppTypography.title),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Center(
+                    child: Stack(
+                      alignment: Alignment.bottomRight,
+                      children: [
+                        CircleAvatar(
+                          radius: 44,
+                          backgroundColor: AppColors.softLightPurple,
+                          backgroundImage: currentAvatar,
+                          child: currentAvatar == null
+                              ? const Icon(Icons.person_rounded, size: 52, color: AppColors.primaryPurple)
+                              : null,
+                        ),
+                        InkWell(
+                          onTap: () async {
+                            final picker = ImagePicker();
+                            final picked = await picker.pickImage(
+                              source: ImageSource.gallery,
+                              maxWidth: 800,
+                              maxHeight: 800,
+                              imageQuality: 85,
+                            );
+                            if (picked != null) {
+                              final dir = await getApplicationDocumentsDirectory();
+                              final targetPath = '${dir.path}/avatar_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                              await File(picked.path).copy(targetPath);
+                              setDialogState(() {
+                                selectedPhotoPath = targetPath;
+                              });
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(7),
+                            decoration: const BoxDecoration(
+                              color: AppColors.primaryPurple,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 16),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      side: const BorderSide(color: AppColors.primaryPurple),
+                    ),
+                    onPressed: () async {
+                      final picker = ImagePicker();
+                      final picked = await picker.pickImage(
+                        source: ImageSource.gallery,
+                        maxWidth: 800,
+                        maxHeight: 800,
+                        imageQuality: 85,
+                      );
+                      if (picked != null) {
+                        final dir = await getApplicationDocumentsDirectory();
+                        final targetPath = '${dir.path}/avatar_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                        await File(picked.path).copy(targetPath);
+                        setDialogState(() {
+                          selectedPhotoPath = targetPath;
+                        });
+                      }
+                    },
+                    icon: const Icon(Icons.photo_library_outlined, size: 18, color: AppColors.primaryPurple),
+                    label: const Text('Choose from Gallery', style: TextStyle(color: AppColors.primaryPurple, fontWeight: FontWeight.w600)),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: firstCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'First Name',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      prefixIcon: const Icon(Icons.person_outline_rounded),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: lastCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'Last Name',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      prefixIcon: const Icon(Icons.person_outline_rounded),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: lastCtrl,
-                decoration: InputDecoration(
-                  labelText: 'Last Name',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  prefixIcon: const Icon(Icons.person_outline_rounded),
-                ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: const Text('Cancel', style: TextStyle(color: AppColors.secondaryText)),
               ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: photoCtrl,
-                decoration: InputDecoration(
-                  labelText: 'Profile Photo URL (Optional)',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  prefixIcon: const Icon(Icons.image_outlined),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primaryPurple,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
+                onPressed: () async {
+                  final newFirst = firstCtrl.text.trim();
+                  final newLast = lastCtrl.text.trim();
+
+                  if (newFirst.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('First name cannot be empty')),
+                    );
+                    return;
+                  }
+
+                  await authService.updateProfile(
+                    firstName: newFirst,
+                    lastName: newLast,
+                    photoUrl: selectedPhotoPath,
+                  );
+
+                  if (dialogCtx.mounted) {
+                    Navigator.pop(dialogCtx);
+                  }
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Profile updated successfully')),
+                    );
+                  }
+                },
+                child: const Text('Save', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               ),
             ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx),
-            child: const Text('Cancel', style: TextStyle(color: AppColors.secondaryText)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primaryPurple,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            onPressed: () async {
-              final newFirst = firstCtrl.text.trim();
-              final newLast = lastCtrl.text.trim();
-              final newPhoto = photoCtrl.text.trim();
-
-              if (newFirst.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('First name cannot be empty')),
-                );
-                return;
-              }
-
-              await authService.updateProfile(
-                firstName: newFirst,
-                lastName: newLast,
-                photoUrl: newPhoto.isNotEmpty ? newPhoto : null,
-              );
-
-              if (dialogCtx.mounted) {
-                Navigator.pop(dialogCtx);
-              }
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Profile updated successfully')),
-                );
-              }
-            },
-            child: const Text('Save', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
+          );
+        },
       ),
     );
   }

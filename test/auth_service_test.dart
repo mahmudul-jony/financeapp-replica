@@ -36,7 +36,7 @@ void main() {
     });
 
     test('Default tabs strictly match Main Wallet and Loans only', () {
-      expect(DriveResourceService.defaultTabs, equals(['Main Wallet', 'Loans']));
+      expect(DriveResourceService.defaultTabs, equals(['Wallet-Main Wallet', 'Loans']));
       expect(DriveResourceService.defaultTabs, isNot(contains('Pocket')));
       expect(DriveResourceService.defaultTabs, isNot(contains('Bank asia')));
       expect(DriveResourceService.defaultTabs, isNot(contains('Savings')));

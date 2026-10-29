@@ -97,15 +97,6 @@ class _CategoryListScreenState extends State<CategoryListScreen> with SingleTick
               separatorBuilder: (context, index) => const SizedBox(height: 8),
               itemBuilder: (context, index) {
                 final category = categories[index];
-                
-                IconData categoryIcon;
-                switch (category.iconCode) {
-                  case 0xe1af: categoryIcon = Icons.payments_rounded; break;
-                  case 0xe25a: categoryIcon = Icons.restaurant_rounded; break;
-                  case 0xe1d1: categoryIcon = Icons.directions_bus_rounded; break;
-                  case 0xe59c: categoryIcon = Icons.shopping_cart_rounded; break;
-                  default: categoryIcon = Icons.category_rounded;
-                }
 
                 return Container(
                   decoration: BoxDecoration(
@@ -115,15 +106,7 @@ class _CategoryListScreenState extends State<CategoryListScreen> with SingleTick
                   ),
                   child: ListTile(
                     dense: true,
-                    leading: CircleAvatar(
-                      radius: 18,
-                      backgroundColor: AppColors.backgroundGrey,
-                      child: Icon(
-                        categoryIcon,
-                        color: category.type == CategoryType.income ? AppColors.incomeGreen : AppColors.expenseAlertText,
-                        size: 20,
-                      ),
-                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
                     title: Row(
                       children: [
                         Text(category.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),

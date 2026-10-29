@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:financeapp/app_constants.dart';
-import 'package:financeapp/widgets/custom_painters.dart';
 import 'package:financeapp/providers/finance_provider.dart';
 
 // =============================================================================
@@ -354,28 +353,24 @@ class AppWalletSelector extends StatelessWidget {
               decoration: BoxDecoration(
                 color: isSelected ? AppColors.primaryPurple : Colors.white,
                 borderRadius: BorderRadius.circular(14),
-                border: isSelected ? null : Border.all(color: AppColors.borderGrey),
+                border: Border.all(
+                  color: isSelected ? AppColors.primaryPurple : AppColors.borderGrey,
+                  width: 1.5,
+                ),
               ),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(acc['name'], maxLines: 1, style: TextStyle(color: isSelected ? Colors.white : AppColors.primaryText, fontWeight: FontWeight.bold, fontSize: 13)),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(acc['balance'], style: TextStyle(color: isSelected ? Colors.white70 : AppColors.secondaryText, fontSize: 14)),
-                            if (acc.containsKey('frozen'))
-                              Text(acc['frozen'], style: TextStyle(color: isSelected ? Colors.white70 : AppColors.secondaryText, fontSize: 14)),
-                          ],
-                        ),
-                      ],
-                    ),
+                  Text(acc['name'], maxLines: 1, style: TextStyle(color: isSelected ? Colors.white : AppColors.primaryText, fontWeight: FontWeight.bold, fontSize: 13)),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(acc['balance'], style: TextStyle(color: isSelected ? Colors.white70 : AppColors.secondaryText, fontSize: 14)),
+                      if (acc.containsKey('frozen'))
+                        Text(acc['frozen'], style: TextStyle(color: isSelected ? Colors.white70 : AppColors.secondaryText, fontSize: 14)),
+                    ],
                   ),
-                  CustomPaint(size: const Size(20, 20), painter: BrandMarkPainter(accent: acc['color'])),
                 ],
               ),
             ),
@@ -411,19 +406,12 @@ class AppStaticWalletCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: AppColors.borderGrey),
             ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(acc['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                      Text(acc['balance'], style: const TextStyle(fontSize: 13, color: AppColors.secondaryText)),
-                    ],
-                  ),
-                ),
-                CustomPaint(size: const Size(20, 20), painter: BrandMarkPainter(accent: acc['color'])),
+                Text(acc['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                Text(acc['balance'], style: const TextStyle(fontSize: 13, color: AppColors.secondaryText)),
               ],
             ),
           ),
