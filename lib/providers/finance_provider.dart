@@ -153,9 +153,15 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
 
   Future<void> _init() async {
     await fetchAll();
+    try {
+      final results = await Connectivity().checkConnectivity();
+      _wasOffline = results.every((r) => r == ConnectivityResult.none);
+    } catch (_) {}
     _initConnectivityListener();
-    // Silent check on app startup (does not show intrusive progress unless changes exist)
-    silentSyncCheck();
+    // Silent check on app startup only when online
+    if (!_wasOffline) {
+      silentSyncCheck();
+    }
   }
 
   void _initConnectivityListener() {

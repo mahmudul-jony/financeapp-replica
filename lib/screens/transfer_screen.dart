@@ -95,7 +95,7 @@ class _TransferScreenState extends State<TransferScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(_isSelectingFrom! ? 'Select From Wallet' : 'Select To Wallet', style: AppTypography.caption),
-                                const SizedBox(height: 8),
+                                const SizedBox(height: 6),
                                 AppWalletSelector(
                                   selectedAccount: (_isSelectingFrom! ? _fromWallet?.name : _toWallet?.name) ?? 'Select Wallet', 
                                   onSelect: (name) => setState(() {
@@ -112,6 +112,7 @@ class _TransferScreenState extends State<TransferScreen> {
                             )
                           else 
                             Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Expanded(
                                   child: AppStaticWalletCard(
@@ -125,8 +126,9 @@ class _TransferScreenState extends State<TransferScreen> {
                                   )
                                 ),
                                 Padding(
-                                  padding: const EdgeInsets.fromLTRB(10, 24, 10, 0), 
+                                  padding: const EdgeInsets.fromLTRB(4, 38, 4, 0), 
                                   child: IconButton(
+                                    visualDensity: VisualDensity.compact,
                                     icon: const Icon(Icons.swap_horiz_rounded, color: AppColors.primaryPurple, size: 24),
                                     onPressed: () {
                                       if (_fromWallet != null && _toWallet != null) {

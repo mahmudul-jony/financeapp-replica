@@ -9,6 +9,15 @@ void main() {
       expect(auth.isAuthenticated, isFalse);
       expect(auth.currentUser, isNull);
       expect(auth.isLoading, isFalse);
+      expect(auth.isOfflineAtLaunch, isFalse);
+    });
+
+    test('AuthService isOfflineAtLaunch state toggles correctly for testing', () {
+      final auth = AuthService();
+      auth.isOfflineAtLaunchForTesting = true;
+      expect(auth.isOfflineAtLaunch, isTrue);
+      auth.isOfflineAtLaunchForTesting = false;
+      expect(auth.isOfflineAtLaunch, isFalse);
     });
 
     test('AuthService is a singleton', () {

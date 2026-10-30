@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:path_provider/path_provider.dart';
@@ -28,6 +29,7 @@ class AuthService extends ChangeNotifier {
   bool _isInitializing = true;
   bool _isLoading = false;
   String? _errorMessage;
+  bool _isOfflineAtLaunch = false;
 
   String? _customFirstName;
   String? _customLastName;
@@ -38,6 +40,19 @@ class AuthService extends ChangeNotifier {
   bool get isInitializing => _isInitializing;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
+  bool get isOfflineAtLaunch => _isOfflineAtLaunch;
+
+  @visibleForTesting
+  set isOfflineAtLaunchForTesting(bool value) {
+    _isOfflineAtLaunch = value;
+    notifyListeners();
+  }
+
+  @visibleForTesting
+  set isInitializingForTesting(bool value) {
+    _isInitializing = value;
+    notifyListeners();
+  }
 
   String? get customFirstName => _customFirstName;
   String? get customLastName => _customLastName;
@@ -93,12 +108,29 @@ class AuthService extends ChangeNotifier {
 
   StreamSubscription<GoogleSignInAccount?>? _authSubscription;
 
+  Future<bool> _checkInternetConnection() async {
+    try {
+      final results = await Connectivity().checkConnectivity();
+      if (results.every((r) => r == ConnectivityResult.none)) {
+        return false;
+      }
+      final lookup = await InternetAddress.lookup('google.com')
+          .timeout(const Duration(milliseconds: 1500));
+      return lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Initializes authentication state and attempts silent sign-in on app launch
   Future<void> initialize() async {
     _isInitializing = true;
     notifyListeners();
 
     await _loadCustomProfile();
+
+    final bool hasInternet = await _checkInternetConnection();
+    _isOfflineAtLaunch = !hasInternet;
 
     _authSubscription?.cancel();
     _authSubscription = _googleSignIn.onCurrentUserChanged.listen((account) {
@@ -111,6 +143,19 @@ class AuthService extends ChangeNotifier {
       }
       notifyListeners();
     });
+
+    if (!hasInternet) {
+      // When opening app without internet, bypass sign-in and allow direct homepage access
+      try {
+        _currentUser = await _googleSignIn.signInSilently();
+      } catch (e) {
+        debugPrint("Silent sign-in check offline completed: $e");
+      } finally {
+        _isInitializing = false;
+        notifyListeners();
+      }
+      return;
+    }
 
     try {
       _currentUser = await _googleSignIn.signInSilently();
@@ -209,6 +254,7 @@ class AuthService extends ChangeNotifier {
     try {
       await _googleSignIn.signOut();
       _currentUser = null;
+      _isOfflineAtLaunch = false;
       DriveResourceService.instance.clearCache();
     } catch (e) {
       debugPrint("Sign-out error: $e");
@@ -224,6 +270,7 @@ class AuthService extends ChangeNotifier {
     try {
       await _googleSignIn.disconnect();
       _currentUser = null;
+      _isOfflineAtLaunch = false;
       DriveResourceService.instance.clearCache();
       notifyListeners();
     } catch (e) {

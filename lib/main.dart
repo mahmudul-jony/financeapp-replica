@@ -61,7 +61,8 @@ class AuthGate extends StatelessWidget {
       );
     }
 
-    if (authService.isAuthenticated) {
+    // Direct to homepage if user is authenticated OR if the app opened without internet
+    if (authService.isAuthenticated || authService.isOfflineAtLaunch) {
       return const BankingDashboardScreen();
     }
 

@@ -324,19 +324,128 @@ class AppAmountInput extends StatelessWidget {
 // SECTION 4: WALLET CARDS
 // -----------------------------------------------------------------------------
 
+class WalletCardItem extends StatelessWidget {
+  final String name;
+  final String balance;
+  final String? frozen;
+  final bool isSelected;
+  final VoidCallback? onTap;
+  final double? width;
+
+  const WalletCardItem({
+    required this.name,
+    required this.balance,
+    this.frozen,
+    required this.isSelected,
+    this.onTap,
+    this.width,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: width,
+        height: 72,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: AppColors.borderGrey,
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isSelected ? const Color(0xFF7252FD) : const Color(0xFFF2F2F2),
+                  border: isSelected
+                      ? null
+                      : Border.all(color: const Color(0xFFDCDCE0), width: 1.2),
+                ),
+                child: isSelected
+                    ? const Icon(
+                        Icons.check_rounded,
+                        size: 11,
+                        color: Colors.white,
+                      )
+                    : null,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF1F1F1F),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    balance,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF7A7A7A),
+                      fontWeight: FontWeight.w400,
+                      fontSize: 13,
+                    ),
+                  ),
+                  if (frozen != null)
+                    Text(
+                      frozen!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF7A7A7A),
+                        fontSize: 12,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class AppWalletSelector extends StatelessWidget {
   final String selectedAccount;
   final Function(String) onSelect;
   final List<Map<String, dynamic>> accounts;
 
   const AppWalletSelector({
-    required this.selectedAccount, required this.onSelect, required this.accounts, super.key,
+    required this.selectedAccount,
+    required this.onSelect,
+    required this.accounts,
+    super.key,
   });
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 70,
+      height: 72,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: accounts.length,
@@ -344,36 +453,13 @@ class AppWalletSelector extends StatelessWidget {
         itemBuilder: (context, index) {
           final acc = accounts[index];
           final bool isSelected = selectedAccount == acc['name'];
-          return InkWell(
+          return WalletCardItem(
+            name: acc['name'] ?? '',
+            balance: acc['balance'] ?? '',
+            frozen: acc['frozen'],
+            isSelected: isSelected,
+            width: 160,
             onTap: () => onSelect(acc['name']),
-            borderRadius: BorderRadius.circular(14),
-            child: Container(
-              width: 155,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: isSelected ? AppColors.primaryPurple : Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: isSelected ? AppColors.primaryPurple : AppColors.borderGrey,
-                  width: 1.5,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(acc['name'], maxLines: 1, style: TextStyle(color: isSelected ? Colors.white : AppColors.primaryText, fontWeight: FontWeight.bold, fontSize: 13)),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(acc['balance'], style: TextStyle(color: isSelected ? Colors.white70 : AppColors.secondaryText, fontSize: 14)),
-                      if (acc.containsKey('frozen'))
-                        Text(acc['frozen'], style: TextStyle(color: isSelected ? Colors.white70 : AppColors.secondaryText, fontSize: 14)),
-                    ],
-                  ),
-                ],
-              ),
-            ),
           );
         },
       ),
@@ -386,35 +472,27 @@ class AppStaticWalletCard extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
-  const AppStaticWalletCard({required this.acc, required this.label, required this.onTap, super.key});
+  const AppStaticWalletCard({
+    required this.acc,
+    required this.label,
+    required this.onTap,
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final bool isSelected = acc['name'] != 'Select' && acc['name'] != 'Select Wallet';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label, style: AppTypography.caption),
         const SizedBox(height: 6),
-        InkWell(
+        WalletCardItem(
+          name: acc['name'] ?? '',
+          balance: acc['balance'] ?? '',
+          frozen: acc['frozen'],
+          isSelected: isSelected,
           onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
-          child: Container(
-            height: 60,
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppColors.borderGrey),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(acc['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                Text(acc['balance'], style: const TextStyle(fontSize: 13, color: AppColors.secondaryText)),
-              ],
-            ),
-          ),
         ),
       ],
     );

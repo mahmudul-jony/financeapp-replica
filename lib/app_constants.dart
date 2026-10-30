@@ -47,20 +47,26 @@ class AppColors {
 
   // --- ৫. ড্যাশবোর্ড গ্রেডিয়েন্ট (Visual Flair) ---
   static const dashboardGradient = [
-    Color(0xFFEBF3FE),
-    Color(0xFFD6E8FE),
-    Color(0xFFB8D8FD),
-    Color(0xFF94C4FC),
-    Color(0xFF6EAEFA),
+    Color(0xFFFFFFFF),
+    Color(0xFFE6E2FD),
+    Color(0xFFCFC4FF),
+    Color(0xFFB7A7FF),
+    Color(0xFF9E8AFD),
+    Color(0xFF876BFC),
+    Color(0xFF7252FD),
+    Color(0xFF7252FD),
   ];
   static const dashboardOfflineGradient = [
-    Color(0xFFF0F0F0),
-    Color(0xFFDCDCDC),
-    Color(0xFFBEBEBE),
-    Color(0xFFA0A0A0),
-    Color(0xFF808080),
+    Color(0xFFFFFFFF),
+    Color(0xFFE6E6E6),
+    Color(0xFFCECECE),
+    Color(0xFFB6B6B6),
+    Color(0xFF9D9D9D),
+    Color(0xFF848484),
+    Color(0xFF6F6F6F),
+    Color(0xFF6F6F6F),
   ];
-  static const dashboardStops = [0.0, 0.35, 0.65, 0.85, 1.0];
+  static const dashboardStops = [0.0, 0.12, 0.25, 0.38, 0.50, 0.62, 0.75, 1.0];
 
   // --- ৬. Inspiration Palette ---
   static const paleBlue = Color(0xFFE8F1FF);
