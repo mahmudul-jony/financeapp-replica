@@ -14,15 +14,11 @@ class UpdateNotificationWidget extends StatelessWidget {
     final updateProvider = context.watch<UpdateProvider>();
     final info = updateProvider.updateInfo;
 
-    // Silent on initial, loading, or when no update is found
+    // Silent on initial, loading, no update, or error
     if (info.status == UpdateStatus.initial ||
         info.status == UpdateStatus.loading ||
-        info.status == UpdateStatus.noUpdate) {
-      return const SizedBox.shrink();
-    }
-
-    if (info.status == UpdateStatus.error) {
-      // Keep errors non-intrusive or hidden unless explicitly needed
+        info.status == UpdateStatus.noUpdate ||
+        info.status == UpdateStatus.error) {
       return const SizedBox.shrink();
     }
 
@@ -40,147 +36,109 @@ class UpdateNotificationWidget extends StatelessWidget {
   ) {
     final isDownloading = updateProvider.isDownloading;
     final progress = updateProvider.downloadProgress;
-    final downloadError = updateProvider.downloadError;
     final percent = (progress * 100).toInt();
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
-      padding: AppSpacing.elementPaddingInsets,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color: AppColors.softLightPurple,
-        borderRadius: AppRadius.borderRadiusLarge,
-        border: Border.all(color: AppColors.borderGrey),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppColors.primaryPurple.withValues(alpha: 0.2),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primaryPurple.withValues(alpha: 0.08),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          // 1. Title: New version available / নতুন ভার্সন উপলব্ধ
+          const Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.system_update_rounded,
                 color: AppColors.primaryPurple,
-                size: 22,
+                size: 20,
               ),
-              AppSpacing.horizontalGap,
-              Expanded(
-                child: Text(
-                  'নতুন ভার্সন উপলব্ধ!',
-                  style: AppTypography.subTitle.copyWith(
-                    color: AppColors.primaryPurple,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: AppColors.primaryPurple,
-                  borderRadius: AppRadius.borderRadiusSmall,
-                ),
-                child: Text(
-                  'v${info.latestVersion}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
+              SizedBox(width: 8),
+              Text(
+                'New version available',
+                style: TextStyle(
+                  color: AppColors.primaryText,
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ],
           ),
-          AppSpacing.smallVerticalGap,
+          const SizedBox(height: 6),
+
+          // 2. Current & New version line
           Text(
-            'বর্তমান: ${info.currentVersion} → নতুন: ${info.latestVersion}',
-            style: AppTypography.caption.copyWith(
+            'Current: ${info.currentVersion}  →  New: ${info.latestVersion}',
+            style: const TextStyle(
               color: AppColors.secondaryText,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
             ),
           ),
-          if (info.releaseNotes != null && info.releaseNotes!.isNotEmpty) ...[
-            AppSpacing.smallVerticalGap,
-            Text(
-              info.releaseNotes!,
-              style: AppTypography.caption.copyWith(
-                color: AppColors.primaryText,
-                fontStyle: FontStyle.italic,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-          if (downloadError != null) ...[
-            AppSpacing.smallVerticalGap,
-            Text(
-              downloadError,
-              style: AppTypography.caption.copyWith(
-                color: AppColors.expenseAlertText,
-              ),
-            ),
-          ],
-          AppSpacing.largeVerticalGap,
+
+          // Progress indicator while downloading
           if (isDownloading) ...[
-            LinearProgressIndicator(
-              value: progress > 0 ? progress : null,
-              backgroundColor: AppColors.borderGrey,
-              color: AppColors.primaryPurple,
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: progress > 0 ? progress : null,
+                backgroundColor: AppColors.borderGrey,
+                color: AppColors.primaryPurple,
+                minHeight: 6,
+              ),
             ),
-            AppSpacing.smallVerticalGap,
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'ডাউনলোড হচ্ছে...',
-                  style: AppTypography.caption.copyWith(
-                    color: AppColors.secondaryText,
-                  ),
-                ),
-                Text(
-                  '$percent%',
-                  style: AppTypography.caption.copyWith(
-                    color: AppColors.primaryPurple,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-            AppSpacing.smallVerticalGap,
           ],
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
+
+          const SizedBox(height: 12),
+
+          // 3. Right-aligned button: Update Now
+          Align(
+            alignment: Alignment.centerRight,
+            child: ElevatedButton(
               onPressed: isDownloading
                   ? null
                   : () async {
                       if (info.apkDownloadUrl != null) {
                         updateProvider.downloadAndInstallUpdate();
                       } else {
-                        // Fallback to browser if direct APK asset is not attached
                         final uri = Uri.parse(info.releaseUrl);
                         if (await canLaunchUrl(uri)) {
                           await launchUrl(uri, mode: LaunchMode.externalApplication);
                         }
                       }
                     },
-              icon: Icon(
-                isDownloading ? Icons.downloading_rounded : Icons.update_rounded,
-                size: 18,
-                color: Colors.white,
-              ),
-              label: Text(
-                isDownloading
-                    ? 'ডাউনলোড চলছে ($percent%)...'
-                    : 'আপডেট ইনস্টল করুন',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                ),
-              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primaryPurple,
+                foregroundColor: Colors.white,
+                elevation: 0,
                 shape: RoundedRectangleBorder(
-                  borderRadius: AppRadius.borderRadiusMedium,
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                padding: const EdgeInsets.symmetric(vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                visualDensity: VisualDensity.compact,
+              ),
+              child: Text(
+                isDownloading ? 'Downloading ($percent%)...' : 'Update Now',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                  color: Colors.white,
+                ),
               ),
             ),
           ),

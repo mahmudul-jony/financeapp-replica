@@ -29,7 +29,7 @@ class ApkUpdateService {
       }
 
       final request = http.Request('GET', Uri.parse(downloadUrl));
-      request.headers['User-Agent'] = 'FinanceApp';
+      request.headers['User-Agent'] = 'OneWallet';
 
       final response = await client.send(request).timeout(
             const Duration(seconds: 30),

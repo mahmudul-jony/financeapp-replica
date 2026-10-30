@@ -23,7 +23,7 @@ class UpdateService {
         Uri.parse(_githubApiUrl),
         headers: {
           'Accept': 'application/vnd.github+json',
-          'User-Agent': 'FinanceApp',
+          'User-Agent': 'OneWallet',
         },
       ).timeout(const Duration(seconds: 15));
 

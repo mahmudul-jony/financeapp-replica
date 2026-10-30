@@ -1,6 +1,6 @@
 {
-    "name": "financeapp",
-    "short_name": "financeapp",
+    "name": "OneWallet",
+    "short_name": "OneWallet",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

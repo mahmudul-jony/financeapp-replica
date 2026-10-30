@@ -94,7 +94,8 @@ void main() {
 
       // Verify sign in screen is presented
       expect(find.byType(SignInScreen), findsOneWidget);
-      expect(find.text('Continue with Google'), findsOneWidget);
+      expect(find.text('OneWallet'), findsOneWidget);
+      expect(find.text('Continue with Gmail'), findsOneWidget);
     });
   });
 }

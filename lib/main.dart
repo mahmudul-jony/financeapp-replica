@@ -30,7 +30,7 @@ class BankingDashboardApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Mobile Banking Dashboard',
+      title: 'OneWallet',
       navigatorObservers: [routeObserver],
       theme: ThemeData(
         useMaterial3: true,
