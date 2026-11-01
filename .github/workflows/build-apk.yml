@@ -51,6 +51,9 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
       - name: Determine Version and Build Number
         id: version_info
         shell: bash

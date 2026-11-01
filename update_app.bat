@@ -67,6 +67,10 @@ if !PHONE_BUILD_NUM! GTR !TARGET_BUILD_NUM! (
     set /a TARGET_BUILD_NUM=PHONE_BUILD_NUM
 )
 
+echo Generating latest app launcher icons...
+call dart run flutter_launcher_icons
+
+echo.
 echo Target Build Number: !TARGET_BUILD_NUM! (Pubspec: !PUBSPEC_BUILD_NUM!, Phone: !PHONE_BUILD_NUM!)
 echo Building Finance App...
 call flutter build apk --release --build-number=!TARGET_BUILD_NUM!
