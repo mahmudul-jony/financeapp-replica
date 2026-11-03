@@ -199,11 +199,11 @@ class _SignInScreenState extends State<SignInScreen> with TickerProviderStateMix
                       children: [
                         Image.asset(
                           'assets/images/logo.png',
-                          width: 30,
-                          height: 30,
+                          width: 42,
+                          height: 42,
                           fit: BoxFit.contain,
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 6),
                         const Text(
                           'OneWallet',
                           style: TextStyle(

@@ -506,6 +506,50 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
     syncNow();
   }
 
+  Future<void> addCashWithdrawal(double amount, int sourceWalletId, DateTime date, String note) async {
+    _validateAmount(amount);
+    await _ensureWalletActive(sourceWalletId);
+
+    final sourceWallet = _wallets.firstWhere((w) => w.id == sourceWalletId);
+    final double availableBalance = sourceWallet.balance - sourceWallet.frozenAmount;
+    if (amount > availableBalance) throw Exception("Insufficient withdrawable balance");
+
+    final defaultCashWallet = _wallets.firstWhere(
+      (w) => w.isDefault,
+      orElse: () => _wallets.firstWhere(
+        (w) => w.name.toLowerCase() == 'cash',
+        orElse: () => _wallets.first,
+      ),
+    );
+    if (sourceWalletId == defaultCashWallet.id) {
+      throw Exception("Cannot withdraw cash from the Cash wallet");
+    }
+
+    final db = await DatabaseHelper.instance.database;
+    final now = DateTime.now();
+    final tx = TransactionModel(
+      title: 'Cash Withdrawal',
+      amount: amount,
+      date: date,
+      note: note,
+      type: TransactionType.cashWithdrawal,
+      walletId: sourceWalletId,
+      toWalletId: defaultCashWallet.id,
+      syncStatus: 'pending',
+      updatedAt: now,
+    );
+
+    await db.transaction((txn) async {
+      await txn.execute('UPDATE wallets SET balance = balance - ? WHERE id = ?', [amount, sourceWalletId]);
+      await txn.execute('UPDATE wallets SET balance = balance + ? WHERE id = ?', [amount, defaultCashWallet.id]);
+      await _insertTransactionInTx(txn, tx);
+    });
+
+    await fetchTransactions();
+    await fetchWallets();
+    syncNow();
+  }
+
   // --- Loan Methods ---
   Future<void> fetchLoans() async {
     final recipients = await DatabaseHelper.instance.queryAll('loan_recipients');
@@ -2395,6 +2439,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
               break;
             case TransactionType.expense:
             case TransactionType.transfer:
+            case TransactionType.cashWithdrawal:
             case TransactionType.loanGiven:
             case TransactionType.loanGivenMore:
             case TransactionType.loanRepaid:
@@ -2417,7 +2462,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
           }
         }
 
-        if (toWalletId == wId && type == TransactionType.transfer) {
+        if (toWalletId == wId && (type == TransactionType.transfer || type == TransactionType.cashWithdrawal)) {
           calculatedBalance += amount;
         }
       }
@@ -2480,6 +2525,9 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
       case "Savings Withdraw":
       case "Savings Withdrawal":
         return TransactionType.savingsWithdrawal;
+      case "Cash Withdrawal":
+      case "cash withdrawal":
+        return TransactionType.cashWithdrawal;
       default:
         return TransactionType.expense;
     }
@@ -2508,7 +2556,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
     final all = await txn.query('wallets', limit: 1);
     if (all.isNotEmpty) return all.first['id'] as int;
     return await txn.insert('wallets', {
-      'name': 'Main Wallet',
+      'name': 'Cash',
       'balance': 0.0,
       'frozen_amount': 0.0,
       'color': 0xFF7F3DFF,
@@ -2561,6 +2609,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
       case TransactionType.savingsCreated: return "Savings Created";
       case TransactionType.savingsIncreased: return "Savings Increased";
       case TransactionType.savingsWithdrawal: return "Savings Withdraw";
+      case TransactionType.cashWithdrawal: return "Cash Withdrawal";
     }
   }
 

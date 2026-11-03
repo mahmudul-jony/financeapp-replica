@@ -147,7 +147,11 @@ class _EditWalletScreenState extends State<EditWalletScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AppTextField(hint: 'Wallet name', controller: _nameController),
+            AppTextField(hint: 'Wallet name', controller: _nameController, readOnly: widget.wallet.isDefault),
+            if (widget.wallet.isDefault) ...[
+              const SizedBox(height: 6),
+              const Text('The default Cash wallet cannot be renamed or deleted.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+            ],
             AppSpacing.largeVerticalGap,
             const Text('Choose Color', style: AppTypography.subTitle),
             const SizedBox(height: 8),

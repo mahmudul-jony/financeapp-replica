@@ -4,6 +4,7 @@ import 'package:financeapp/models/account_model.dart';
 import 'package:financeapp/screens/add_expense_screen.dart';
 import 'package:financeapp/screens/add_money_screen.dart';
 import 'package:financeapp/screens/transfer_screen.dart';
+import 'package:financeapp/screens/withdraw_screen.dart';
 import 'package:financeapp/screens/savings_screen.dart';
 import 'package:financeapp/screens/investment_screen.dart';
 import 'package:financeapp/screens/loan_screen.dart';
@@ -17,6 +18,7 @@ class QuickActionsGrid extends StatelessWidget {
     QuickAction('Add Money', Icons.account_balance_wallet_outlined),
     QuickAction('Add Expense', Icons.note_add_outlined),
     QuickAction('Transfer', Icons.swap_calls_outlined),
+    QuickAction('Withdraw', Icons.local_atm_outlined),
     QuickAction('Loans', Icons.real_estate_agent_outlined),
     QuickAction('Investments', Icons.analytics_outlined),
     QuickAction('Savings', Icons.savings_outlined),
@@ -57,6 +59,8 @@ class QuickActionsGrid extends StatelessWidget {
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const AddMoneyScreen()));
                   } else if (action.label == 'Transfer') {
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const TransferScreen()));
+                  } else if (action.label == 'Withdraw') {
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const WithdrawScreen()));
                   } else if (action.label == 'Savings') {
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const SavingsListScreen()));
                   } else if (action.label == 'Investments') {

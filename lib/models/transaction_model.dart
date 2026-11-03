@@ -16,7 +16,8 @@ enum TransactionType {
   investmentAdjustment,
   savingsCreated,
   savingsIncreased,
-  savingsWithdrawal
+  savingsWithdrawal,
+  cashWithdrawal
 }
 
 class TransactionModel {
@@ -123,6 +124,8 @@ class TransactionModel {
         return 'Savings Increased';
       case TransactionType.savingsWithdrawal:
         return 'Savings Withdrawn';
+      case TransactionType.cashWithdrawal:
+        return 'Cash Withdrawal';
     }
   }
 

@@ -31,8 +31,8 @@ class TransactionItem extends StatelessWidget {
         transaction.type == TransactionType.savingsIncreased;
 
     String walletDisplay = walletName;
-    if (transaction.type == TransactionType.transfer && toWalletName != null) {
-      walletDisplay = "$walletName - $toWalletName";
+    if ((transaction.type == TransactionType.transfer || transaction.type == TransactionType.cashWithdrawal) && toWalletName != null) {
+      walletDisplay = "$walletName → $toWalletName";
     }
 
     // Determine Icon
@@ -42,6 +42,10 @@ class TransactionItem extends StatelessWidget {
     switch (transaction.type) {
       case TransactionType.transfer:
         iconData = Icons.swap_horiz;
+        iconColor = AppColors.primaryPurple;
+        break;
+      case TransactionType.cashWithdrawal:
+        iconData = Icons.local_atm_outlined;
         iconColor = AppColors.primaryPurple;
         break;
       case TransactionType.income:

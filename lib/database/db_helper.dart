@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -125,6 +125,9 @@ class DatabaseHelper {
           last_error TEXT
         )
       ''');
+    }
+    if (oldVersion < 8) {
+      await db.execute("UPDATE wallets SET name = 'Cash' WHERE isDefault = 1");
     }
   }
 
@@ -279,7 +282,7 @@ class DatabaseHelper {
 
     // Insert Default Wallet
     await db.insert('wallets', {
-      'name': 'Main Wallet',
+      'name': 'Cash',
       'balance': 0.0,
       'color': 0xFF7F3DFF,
       'isDefault': 1,

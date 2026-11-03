@@ -65,7 +65,7 @@ class SyncService {
     final wName = walletName.trim();
     final sName = secondaryTabName?.trim();
 
-    if (type == TransactionType.transfer) {
+    if (type == TransactionType.transfer || type == TransactionType.cashWithdrawal) {
       if (wName.isNotEmpty && wName != 'N/A') {
         tabs.add(walletTabName(wName));
       }
