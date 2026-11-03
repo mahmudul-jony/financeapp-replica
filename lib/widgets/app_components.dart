@@ -329,6 +329,7 @@ class WalletCardItem extends StatelessWidget {
   final String balance;
   final String? frozen;
   final bool isSelected;
+  final bool isCheckGray;
   final VoidCallback? onTap;
   final double? width;
 
@@ -337,6 +338,7 @@ class WalletCardItem extends StatelessWidget {
     required this.balance,
     this.frozen,
     required this.isSelected,
+    this.isCheckGray = false,
     this.onTap,
     this.width,
     super.key,
@@ -369,7 +371,7 @@ class WalletCardItem extends StatelessWidget {
                 height: 20,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: isSelected ? const Color(0xFF7252FD) : const Color(0xFFF2F2F2),
+                  color: isSelected ? (isCheckGray ? const Color(0xFF9E9E9E) : const Color(0xFF7252FD)) : const Color(0xFFF2F2F2),
                   border: isSelected
                       ? null
                       : Border.all(color: const Color(0xFFDCDCE0), width: 1.2),
@@ -471,11 +473,13 @@ class AppStaticWalletCard extends StatelessWidget {
   final Map<String, dynamic> acc;
   final String label;
   final VoidCallback onTap;
+  final bool isCheckGray;
 
   const AppStaticWalletCard({
     required this.acc,
     required this.label,
     required this.onTap,
+    this.isCheckGray = false,
     super.key,
   });
 
@@ -492,6 +496,7 @@ class AppStaticWalletCard extends StatelessWidget {
           balance: acc['balance'] ?? '',
           frozen: acc['frozen'],
           isSelected: isSelected,
+          isCheckGray: isCheckGray,
           onTap: onTap,
         ),
       ],
@@ -666,31 +671,35 @@ class _AppErrorBannerState extends State<AppErrorBanner> {
   @override
   Widget build(BuildContext context) {
     if (_visibleMessage == null || _visibleMessage!.isEmpty) return const SizedBox.shrink();
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      decoration: const BoxDecoration(
-        color: Color(0xFFDC2626), // Red background
-      ),
-      child: SafeArea(
-        bottom: false,
-        child: Row(
-          children: [
-            const Icon(Icons.error_outline_rounded, color: Colors.white, size: 20),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                _visibleMessage!,
-                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        decoration: const BoxDecoration(
+          color: Color(0xFFDC2626), // Red background
+        ),
+        child: SafeArea(
+          bottom: false,
+          child: Row(
+            children: [
+              const Icon(Icons.info_outline_rounded, color: Colors.white, size: 16),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _visibleMessage!,
+                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
+                ),
               ),
-            ),
-            IconButton(
-              onPressed: _hideBanner,
-              icon: const Icon(Icons.close_rounded, size: 18, color: Colors.white70),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-            ),
-          ],
+              InkWell(
+                onTap: _hideBanner,
+                child: const Padding(
+                  padding: EdgeInsets.all(4.0),
+                  child: Icon(Icons.close_rounded, size: 14, color: Colors.white70),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

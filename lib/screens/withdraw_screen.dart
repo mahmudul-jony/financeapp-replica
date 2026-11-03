@@ -113,7 +113,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                             ),
                           ] else ...[
                             Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
                                 Expanded(
                                   child: AppStaticWalletCard(
@@ -131,7 +131,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                                   ),
                                 ),
                                 const Padding(
-                                  padding: EdgeInsets.fromLTRB(8, 38, 8, 0),
+                                  padding: EdgeInsets.fromLTRB(6, 0, 6, 24),
                                   child: Icon(Icons.arrow_forward_rounded, color: Colors.grey, size: 22),
                                 ),
                                 Expanded(
@@ -142,6 +142,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                                       'color': Color(defaultCashWallet.color),
                                     },
                                     label: 'To (Cash)',
+                                    isCheckGray: true,
                                     onTap: () {}, // Fixed to Cash wallet
                                   ),
                                 ),

@@ -14,13 +14,20 @@ class AccountCard extends StatelessWidget {
       height: compact ? 180 : 204,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: AppColors.cardBackground,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            data.accent,
+            Color.alphaBlend(Colors.black.withValues(alpha: 0.2), data.accent),
+          ],
+        ),
         borderRadius: AppRadius.borderRadiusLarge,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.12),
+            color: data.accent.withValues(alpha: 0.35),
             blurRadius: 18,
-            offset: const Offset(0, 10),
+            offset: const Offset(0, 8),
           ),
         ],
       ),

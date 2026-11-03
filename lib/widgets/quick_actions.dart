@@ -61,9 +61,7 @@ class QuickActionsGrid extends StatelessWidget {
                 isDisabled: isDisabled,
                 onTap: () {
                   if (isDisabled) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(disabledReason)),
-                    );
+                    context.read<FinanceProvider>().showNotice(disabledReason);
                     return;
                   }
                   if (action.label == 'Add Expense') {
@@ -114,7 +112,7 @@ class QuickActionItem extends StatelessWidget {
               child: Icon(
                 action.icon, 
                 color: isDisabled ? Colors.grey[400] : Colors.white, 
-                size: 20
+                size: 24
               ),
             ),
           ),

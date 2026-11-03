@@ -44,6 +44,19 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   bool get isOffline => _wasOffline;
   bool get isOnline => !_wasOffline;
 
+  String? _noticeMessage;
+  String? get noticeMessage => _noticeMessage;
+
+  void showNotice(String message) {
+    _noticeMessage = message;
+    notifyListeners();
+  }
+
+  void clearNoticeMessage() {
+    _noticeMessage = null;
+    notifyListeners();
+  }
+
   // Filter & Preferences State
   FilterType _currentFilter = FilterType.month;
   DateTime _selectedFilterDate = DateTime.now();

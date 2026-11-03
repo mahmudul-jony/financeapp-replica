@@ -7,6 +7,7 @@ import 'package:financeapp/screens/all_transactions_screen.dart';
 import 'package:financeapp/screens/category_list_screen.dart';
 import 'package:financeapp/widgets/summary_card.dart';
 import 'package:financeapp/widgets/quick_actions.dart';
+import 'package:financeapp/widgets/app_components.dart';
 import 'package:provider/provider.dart';
 import 'package:financeapp/providers/finance_provider.dart';
 import 'package:financeapp/services/auth_service.dart';
@@ -102,6 +103,16 @@ class _BankingDashboardScreenState extends State<BankingDashboardScreen> with Ro
               ),
             ),
           ),
+          if (provider.noticeMessage != null)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: AppErrorBanner(
+                message: provider.noticeMessage,
+                onDismissed: () => provider.clearNoticeMessage(),
+              ),
+            ),
           if (provider.isSyncing)
             const Positioned(
               top: 0,
