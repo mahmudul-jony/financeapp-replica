@@ -183,13 +183,13 @@ class SummaryCard extends StatelessWidget {
                                 ),
                                 const SizedBox(height: 2),
                                 const Text(
-                                  "Expanse of\nincome",
+                                  "Expense",
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
                                     color: Colors.white,
-                                    fontSize: 10.5,
+                                    fontSize: 12,
                                     height: 1.15,
-                                    fontWeight: FontWeight.w400,
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
                               ],

@@ -27,7 +27,11 @@ class QuickActionsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final walletCount = context.watch<FinanceProvider>().wallets.length;
+    final provider = context.watch<FinanceProvider>();
+    final walletCount = provider.wallets.length;
+    final nonCashWalletsCount = provider.activeWallets
+        .where((w) => !w.isDefault && w.name.toLowerCase() != 'cash')
+        .length;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -37,8 +41,17 @@ class QuickActionsGrid extends StatelessWidget {
           runSpacing: AppSpacing.verticalGap.height!,
           children: actions.map((action) {
             bool isDisabled = false;
+            String disabledReason = '';
+
             if (action.label == 'Transfer' && walletCount < 2) {
               isDisabled = true;
+              disabledReason = 'Add at least 2 wallets to use Transfer';
+            } else if (action.label == 'Withdraw' && nonCashWalletsCount == 0) {
+              isDisabled = true;
+              disabledReason = 'Add a Bank or MFS wallet to use Withdraw';
+            } else if (action.label == 'Assets') {
+              isDisabled = true;
+              disabledReason = 'Assets feature coming soon';
             }
 
             return SizedBox(
@@ -49,7 +62,7 @@ class QuickActionsGrid extends StatelessWidget {
                 onTap: () {
                   if (isDisabled) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Add at least 2 wallets to use Transfer')),
+                      SnackBar(content: Text(disabledReason)),
                     );
                     return;
                   }

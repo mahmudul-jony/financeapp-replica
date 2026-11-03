@@ -56,18 +56,19 @@ class ManageScreen extends StatelessWidget {
                 return Stack(
                   children: [
                     AccountCard(data: cardData),
-                    Positioned(
-                      top: 12,
-                      right: 12,
-                      child: Row(
-                        children: [
-                          AppEditIconButton(
-                            color: Colors.white,
-                            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => EditWalletScreen(wallet: w))),
-                          ),
-                        ],
+                    if (!w.isDefault)
+                      Positioned(
+                        top: 12,
+                        right: 12,
+                        child: Row(
+                          children: [
+                            AppEditIconButton(
+                              color: Colors.white,
+                              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => EditWalletScreen(wallet: w))),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
                     // If it's archived, overlay a label
                     if (w.isArchived)
                       Positioned.fill(

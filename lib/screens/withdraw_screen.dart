@@ -80,7 +80,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.primaryText, size: 20),
           onPressed: () => _isSelectingSource ? setState(() => _isSelectingSource = false) : Navigator.pop(context),
         ),
-        title: const Text('Cash Withdrawal', style: AppTypography.title),
+        title: const Text('Withdraw', style: AppTypography.title),
         centerTitle: false,
       ),
       body: Column(
@@ -100,33 +100,8 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (withdrawableWallets.isEmpty) ...[
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: Colors.orange.shade50,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.orange.shade200),
-                              ),
-                              child: const Row(
-                                children: [
-                                  Icon(Icons.info_outline, color: Colors.orange),
-                                  SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      'Please add a Bank or MFS wallet first to perform a cash withdrawal.',
-                                      style: TextStyle(color: Colors.black87, fontSize: 13),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                          ],
-
                           if (_isSelectingSource) ...[
-                            const Text('Select Source Wallet', style: AppTypography.caption),
+                            const Text('Select Withdraw From', style: AppTypography.caption),
                             const SizedBox(height: 6),
                             AppWalletSelector(
                               selectedAccount: _sourceWallet?.name ?? 'Select Wallet',
@@ -157,7 +132,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                                 ),
                                 const Padding(
                                   padding: EdgeInsets.fromLTRB(8, 38, 8, 0),
-                                  child: Icon(Icons.arrow_forward_rounded, color: AppColors.primaryPurple, size: 22),
+                                  child: Icon(Icons.arrow_forward_rounded, color: Colors.grey, size: 22),
                                 ),
                                 Expanded(
                                   child: AppStaticWalletCard(
@@ -166,39 +141,13 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                                       'balance': AppFormat.currency(defaultCashWallet.balance),
                                       'color': Color(defaultCashWallet.color),
                                     },
-                                    label: 'Destination (Cash)',
+                                    label: 'To (Cash)',
                                     onTap: () {}, // Fixed to Cash wallet
                                   ),
                                 ),
                               ],
                             ),
                           ],
-
-                          const SizedBox(height: 16),
-
-                          // Read-Only Category Indicator
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: AppColors.borderGrey),
-                            ),
-                            child: const Row(
-                              children: [
-                                Icon(Icons.local_atm_outlined, color: AppColors.primaryPurple, size: 22),
-                                SizedBox(width: 12),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('Category', style: TextStyle(color: Colors.grey, fontSize: 11)),
-                                    SizedBox(height: 2),
-                                    Text('Cash Withdrawal', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
 
                           const SizedBox(height: 16),
                           AppSelectionField(

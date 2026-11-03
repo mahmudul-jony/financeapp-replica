@@ -35,8 +35,12 @@ class AuthService extends ChangeNotifier {
   String? _customLastName;
   String? _customPhotoUrl;
 
+  String? _cachedGoogleDisplayName;
+  String? _cachedGoogleEmail;
+  String? _cachedGooglePhotoUrl;
+
   GoogleSignInAccount? get currentUser => _currentUser;
-  bool get isAuthenticated => _currentUser != null;
+  bool get isAuthenticated => _currentUser != null || (_cachedGoogleEmail != null && _cachedGoogleEmail!.isNotEmpty);
   bool get isInitializing => _isInitializing;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
@@ -58,11 +62,13 @@ class AuthService extends ChangeNotifier {
   String? get customLastName => _customLastName;
   String? get customPhotoUrl => _customPhotoUrl;
 
+  String get email => _currentUser?.email ?? _cachedGoogleEmail ?? '';
+
   String get firstName {
     if (_customFirstName != null && _customFirstName!.trim().isNotEmpty) {
       return _customFirstName!.trim();
     }
-    final gName = _currentUser?.displayName?.trim() ?? '';
+    final gName = _currentUser?.displayName?.trim() ?? _cachedGoogleDisplayName?.trim() ?? '';
     if (gName.isNotEmpty) {
       return gName.split(' ').first;
     }
@@ -73,7 +79,7 @@ class AuthService extends ChangeNotifier {
     if (_customLastName != null && _customLastName!.trim().isNotEmpty) {
       return _customLastName!.trim();
     }
-    final gName = _currentUser?.displayName?.trim() ?? '';
+    final gName = _currentUser?.displayName?.trim() ?? _cachedGoogleDisplayName?.trim() ?? '';
     if (gName.isNotEmpty) {
       final parts = gName.split(' ');
       if (parts.length > 1) {
@@ -90,7 +96,7 @@ class AuthService extends ChangeNotifier {
     return '$first $last';
   }
 
-  String? get photoUrl => _customPhotoUrl ?? _currentUser?.photoUrl;
+  String? get photoUrl => _customPhotoUrl ?? _currentUser?.photoUrl ?? _cachedGooglePhotoUrl;
 
   ImageProvider? get avatarImageProvider {
     final url = photoUrl;
@@ -128,6 +134,7 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
 
     await _loadCustomProfile();
+    await _loadGoogleProfileCache();
 
     final bool hasInternet = await _checkInternetConnection();
     _isOfflineAtLaunch = !hasInternet;
@@ -136,6 +143,7 @@ class AuthService extends ChangeNotifier {
     _authSubscription = _googleSignIn.onCurrentUserChanged.listen((account) {
       _currentUser = account;
       if (account != null) {
+        _saveGoogleProfileCache(account);
         DriveResourceService.instance.getOrCreateResources().catchError((e) {
           debugPrint("Drive init error on auth change: $e");
           return const DriveResourceResult(isSuccess: false);
@@ -148,6 +156,9 @@ class AuthService extends ChangeNotifier {
       // When opening app without internet, bypass sign-in and allow direct homepage access
       try {
         _currentUser = await _googleSignIn.signInSilently();
+        if (_currentUser != null) {
+          _saveGoogleProfileCache(_currentUser!);
+        }
       } catch (e) {
         debugPrint("Silent sign-in check offline completed: $e");
       } finally {
@@ -160,6 +171,7 @@ class AuthService extends ChangeNotifier {
     try {
       _currentUser = await _googleSignIn.signInSilently();
       if (_currentUser != null) {
+        _saveGoogleProfileCache(_currentUser!);
         DriveResourceService.instance.getOrCreateResources().catchError((e) {
           debugPrint("Drive init error on silent sign-in: $e");
           return const DriveResourceResult(isSuccess: false);
@@ -186,6 +198,40 @@ class AuthService extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint("Error loading profile prefs: $e");
+    }
+  }
+
+  Future<void> _loadGoogleProfileCache() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/google_user_cache.json');
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        final data = jsonDecode(content);
+        _cachedGoogleDisplayName = data['display_name'] as String?;
+        _cachedGoogleEmail = data['email'] as String?;
+        _cachedGooglePhotoUrl = data['photo_url'] as String?;
+      }
+    } catch (e) {
+      debugPrint("Error loading google user cache: $e");
+    }
+  }
+
+  Future<void> _saveGoogleProfileCache(GoogleSignInAccount account) async {
+    _cachedGoogleDisplayName = account.displayName;
+    _cachedGoogleEmail = account.email;
+    _cachedGooglePhotoUrl = account.photoUrl;
+
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/google_user_cache.json');
+      await file.writeAsString(jsonEncode({
+        'display_name': account.displayName,
+        'email': account.email,
+        'photo_url': account.photoUrl,
+      }));
+    } catch (e) {
+      debugPrint("Error caching google user: $e");
     }
   }
 

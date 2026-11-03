@@ -232,7 +232,26 @@ class _AnalyticsDashboardScreenState extends State<AnalyticsDashboardScreen> wit
                         SizedBox(
                           width: 60,
                           height: 60,
-                          child: CustomPaint(painter: DonutChartPainter(percentage: (profitRatio / 100).clamp(0.0, 1.0), color: AppColors.incomeGreen)),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              CustomPaint(
+                                size: const Size(60, 60),
+                                painter: DonutChartPainter(
+                                  percentage: (profitRatio / 100).clamp(0.0, 1.0),
+                                  color: AppColors.incomeGreen,
+                                ),
+                              ),
+                              Text(
+                                "${profitRatio % 1 == 0 ? profitRatio.toInt() : profitRatio.toStringAsFixed(1)}%",
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 10,
+                                  color: AppColors.primaryText,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),

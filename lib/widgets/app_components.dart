@@ -668,28 +668,30 @@ class _AppErrorBannerState extends State<AppErrorBanner> {
     if (_visibleMessage == null || _visibleMessage!.isEmpty) return const SizedBox.shrink();
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.red.shade50,
-        border: Border(bottom: BorderSide(color: Colors.red.shade100)),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: const BoxDecoration(
+        color: Color(0xFFDC2626), // Red background
       ),
-      child: Row(
-        children: [
-          Icon(Icons.error_outline_rounded, color: Colors.red.shade700, size: 18),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              _visibleMessage!,
-              style: TextStyle(color: Colors.red.shade700, fontSize: 13, fontWeight: FontWeight.w500),
+      child: SafeArea(
+        bottom: false,
+        child: Row(
+          children: [
+            const Icon(Icons.error_outline_rounded, color: Colors.white, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _visibleMessage!,
+                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+              ),
             ),
-          ),
-          IconButton(
-            onPressed: _hideBanner,
-            icon: Icon(Icons.close_rounded, size: 16, color: Colors.red.shade300),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-          ),
-        ],
+            IconButton(
+              onPressed: _hideBanner,
+              icon: const Icon(Icons.close_rounded, size: 18, color: Colors.white70),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+            ),
+          ],
+        ),
       ),
     );
   }
