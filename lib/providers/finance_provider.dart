@@ -129,13 +129,12 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   }
 
   List<TransactionModel> get filteredTransactions {
-    return _transactions.where((tx) {
+    final list = _transactions.where((tx) {
       final date = tx.date;
       switch (_currentFilter) {
         case FilterType.today:
           return date.day == _selectedFilterDate.day && date.month == _selectedFilterDate.month && date.year == _selectedFilterDate.year;
         case FilterType.week:
-          // Find start and end of week for selected date
           final startOfWeek = _selectedFilterDate.subtract(Duration(days: _selectedFilterDate.weekday - 1));
           final endOfWeek = startOfWeek.add(const Duration(days: 6, hours: 23, minutes: 59));
           return date.isAfter(startOfWeek.subtract(const Duration(seconds: 1))) && date.isBefore(endOfWeek);
@@ -145,12 +144,30 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
           return date.year == _selectedFilterDate.year;
       }
     }).toList();
+
+    list.sort((a, b) {
+      final cmp = b.date.compareTo(a.date);
+      if (cmp != 0) return cmp;
+      return (b.id ?? 0).compareTo(a.id ?? 0);
+    });
+
+    return list;
+  }
+
+  List<TransactionModel> get sortedTransactions {
+    final list = List<TransactionModel>.from(_transactions);
+    list.sort((a, b) {
+      final cmp = b.date.compareTo(a.date);
+      if (cmp != 0) return cmp;
+      return (b.id ?? 0).compareTo(a.id ?? 0);
+    });
+    return list;
   }
 
   List<Wallet> get wallets => _wallets;
   List<Wallet> get activeWallets => _wallets.where((w) => !w.isArchived).toList();
   List<Category> get categories => _categories;
-  List<Category> get activeCategories => _categories.where((c) => !c.isArchived).toList();
+  List<Category> get activeCategories => _categories.where((c) => !c.isArchived && c.name.toLowerCase() != 'initial balance').toList();
   List<TransactionModel> get transactions => _transactions;
   List<LoanRecipient> get loanRecipients => _loanRecipients;
   List<LoanTransaction> get loanTransactions => _loanTransactions;
@@ -267,8 +284,14 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
     syncNow();
 
     if (wallet.balance > 0) {
-      final defaultCat = _categories.firstWhere((c) => c.type == CategoryType.income, orElse: () => _categories.first);
-      await addIncome(wallet.balance, savedWallet.id!, defaultCat.id!, DateTime.now(), "Initial Balance");
+      final initialCat = _categories.firstWhere(
+        (c) => c.name.toLowerCase() == 'initial balance',
+        orElse: () => _categories.firstWhere(
+          (c) => c.type == CategoryType.income,
+          orElse: () => _categories.first,
+        ),
+      );
+      await addIncome(wallet.balance, savedWallet.id!, initialCat.id!, DateTime.now(), "Initial Balance");
     }
   }
 
@@ -541,10 +564,14 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
       throw Exception("Cannot withdraw cash from the Cash wallet");
     }
 
+    final String sourceName = sourceWallet.name;
+    final String cashName = defaultCashWallet.name;
+    final String titleText = "Withdraw from $sourceName - $cashName";
+
     final db = await DatabaseHelper.instance.database;
     final now = DateTime.now();
     final tx = TransactionModel(
-      title: 'Cash Withdrawal',
+      title: titleText,
       amount: amount,
       date: date,
       note: note,
@@ -2375,7 +2402,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   }
 
   Map<String, dynamic> _buildTxSyncPayload(TransactionModel tx) {
-    if (tx.type == TransactionType.transfer && tx.toWalletId != null) {
+    if ((tx.type == TransactionType.transfer || tx.type == TransactionType.cashWithdrawal) && tx.toWalletId != null) {
       final fromWallet = _wallets.firstWhere((w) => w.id == tx.walletId, orElse: () => _wallets.first);
       final toWallet = _wallets.firstWhere((w) => w.id == tx.toWalletId, orElse: () => _wallets.first);
       return {
@@ -2650,7 +2677,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
       case TransactionType.savingsCreated: return "Savings Created";
       case TransactionType.savingsIncreased: return "Savings Increased";
       case TransactionType.savingsWithdrawal: return "Savings Withdraw";
-      case TransactionType.cashWithdrawal: return "Cash Withdrawal";
+      case TransactionType.cashWithdrawal: return "Withdraw";
     }
   }
 

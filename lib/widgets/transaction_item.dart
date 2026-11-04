@@ -17,9 +17,12 @@ class TransactionItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool isTransferOrWithdraw = 
+        transaction.type == TransactionType.transfer ||
+        transaction.type == TransactionType.cashWithdrawal;
+
     final bool isExpense = 
         transaction.type == TransactionType.expense || 
-        transaction.type == TransactionType.transfer ||
         transaction.type == TransactionType.loanGiven ||
         transaction.type == TransactionType.loanGivenMore ||
         transaction.type == TransactionType.loanRepaid ||
@@ -31,7 +34,7 @@ class TransactionItem extends StatelessWidget {
         transaction.type == TransactionType.savingsIncreased;
 
     String walletDisplay = walletName;
-    if ((transaction.type == TransactionType.transfer || transaction.type == TransactionType.cashWithdrawal) && toWalletName != null) {
+    if (isTransferOrWithdraw && toWalletName != null) {
       walletDisplay = "$walletName → $toWalletName";
     }
 
@@ -83,6 +86,14 @@ class TransactionItem extends StatelessWidget {
             : AppColors.incomeGreen;
         break;
     }
+
+    final String amountText = isTransferOrWithdraw
+        ? AppFormat.currency(transaction.amount)
+        : '${isExpense ? "-" : "+"}${AppFormat.currency(transaction.amount)}';
+
+    final Color amountColor = isTransferOrWithdraw
+        ? AppColors.primaryPurple
+        : (isExpense ? AppColors.expenseAlertText : AppColors.incomeGreen);
 
     return Container(
       decoration: BoxDecoration(
@@ -142,9 +153,9 @@ class TransactionItem extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  '${isExpense ? "-" : "+"}${AppFormat.currency(transaction.amount)}',
+                  amountText,
                   style: TextStyle(
-                    color: isExpense ? AppColors.expenseAlertText : AppColors.incomeGreen,
+                    color: amountColor,
                     fontWeight: FontWeight.bold,
                     fontSize: 15,
                   ),

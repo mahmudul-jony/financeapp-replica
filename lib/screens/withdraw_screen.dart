@@ -76,6 +76,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
+        titleSpacing: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.primaryText, size: 20),
           onPressed: () => _isSelectingSource ? setState(() => _isSelectingSource = false) : Navigator.pop(context),

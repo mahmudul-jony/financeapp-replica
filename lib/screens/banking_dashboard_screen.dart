@@ -193,7 +193,7 @@ class _BankingDashboardScreenState extends State<BankingDashboardScreen> with Ro
   }
 
   Widget _buildRecentTransactions(BuildContext context, FinanceProvider provider) {
-    final transactions = provider.transactions.reversed.toList();
+    final transactions = provider.sortedTransactions;
     final recentCount = transactions.length > 5 ? 5 : transactions.length;
 
     return Column(

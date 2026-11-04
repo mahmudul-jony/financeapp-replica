@@ -69,7 +69,7 @@ class _CategoryListScreenState extends State<CategoryListScreen> with SingleTick
 
   Widget _buildCategoryListTab(CategoryType type) {
     final provider = context.watch<FinanceProvider>();
-    final categories = provider.categories.where((c) => c.type == type).toList();
+    final categories = provider.categories.where((c) => c.type == type && c.name.toLowerCase() != 'initial balance').toList();
 
     return Column(
       children: [

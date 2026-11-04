@@ -220,7 +220,7 @@ class AppTextField extends StatelessWidget {
           keyboardType: keyboardType,
           inputFormatters: (keyboardType?.toString().contains('number') == true ||
                            keyboardType?.toString().contains('decimal') == true)
-              ? [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))]
+              ? [DecimalTextInputFormatter()]
               : null,
           style: const TextStyle(fontSize: 14),
           decoration: InputDecoration(
@@ -307,7 +307,7 @@ class AppAmountInput extends StatelessWidget {
                 autofocus: true,
                 textAlign: TextAlign.center,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                inputFormatters: [DecimalTextInputFormatter()],
                 style: AppTypography.largeAmount.copyWith(fontSize: 44),
                 decoration: const InputDecoration(border: InputBorder.none, hintText: '0', isDense: true, contentPadding: EdgeInsets.zero),
               ),
@@ -317,6 +317,36 @@ class AppAmountInput extends StatelessWidget {
         Text(subLabel, style: AppTypography.subTitle),
       ],
     );
+  }
+}
+
+class DecimalTextInputFormatter extends TextInputFormatter {
+  final int decimalRange;
+  DecimalTextInputFormatter({this.decimalRange = 2});
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    String text = newValue.text;
+    if (text.isEmpty) return newValue;
+
+    if (text.contains('.')) {
+      if (text.indexOf('.') != text.lastIndexOf('.')) {
+        return oldValue;
+      }
+      final parts = text.split('.');
+      if (parts.length > 1 && parts[1].length > decimalRange) {
+        return oldValue;
+      }
+    }
+
+    if (RegExp(r'^\d*\.?\d*$').hasMatch(text)) {
+      return newValue;
+    }
+
+    return oldValue;
   }
 }
 

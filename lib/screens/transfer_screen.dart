@@ -71,6 +71,7 @@ class _TransferScreenState extends State<TransferScreen> {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
+        titleSpacing: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.primaryText, size: 20),
           onPressed: () => _isSelectingFrom != null ? setState(() => _isSelectingFrom = null) : Navigator.pop(context),

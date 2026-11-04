@@ -25,7 +25,7 @@ class _AllTransactionsScreenState extends State<AllTransactionsScreen> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<FinanceProvider>();
-    final transactions = provider.filteredTransactions.reversed.toList();
+    final transactions = provider.filteredTransactions;
 
     return Scaffold(
       backgroundColor: AppColors.backgroundGrey,
@@ -34,6 +34,7 @@ class _AllTransactionsScreenState extends State<AllTransactionsScreen> {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
+        titleSpacing: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.primaryText, size: 20),
           onPressed: () => Navigator.pop(context),

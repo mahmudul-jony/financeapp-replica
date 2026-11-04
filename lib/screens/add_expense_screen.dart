@@ -63,6 +63,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
+        titleSpacing: 0,
         leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.primaryText, size: 20), onPressed: () => Navigator.pop(context)),
         title: const Text('Add Expense', style: AppTypography.title), centerTitle: false,
       ),

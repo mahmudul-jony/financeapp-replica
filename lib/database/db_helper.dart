@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -128,6 +128,16 @@ class DatabaseHelper {
     }
     if (oldVersion < 8) {
       await db.execute("UPDATE wallets SET name = 'Cash' WHERE isDefault = 1");
+    }
+    if (oldVersion < 9) {
+      final check = await db.query('categories', where: 'name = ?', whereArgs: ['Initial Balance']);
+      if (check.isEmpty) {
+        await db.insert('categories', {
+          'name': 'Initial Balance',
+          'iconCode': 0xe0b2,
+          'type': 'income',
+        });
+      }
     }
   }
 
@@ -290,6 +300,7 @@ class DatabaseHelper {
 
     // Insert Default Categories
     final List<Map<String, dynamic>> defaultCategories = [
+      {'name': 'Initial Balance', 'iconCode': 0xe0b2, 'type': 'income'},
       {'name': 'Salary', 'iconCode': 0xe1af, 'type': 'income'},
       {'name': 'Food', 'iconCode': 0xe25a, 'type': 'expense'},
       {'name': 'Transport', 'iconCode': 0xe1d1, 'type': 'expense'},
@@ -392,6 +403,7 @@ class DatabaseHelper {
 
     // Insert Default Categories
     final List<Map<String, dynamic>> defaultCategories = [
+      {'name': 'Initial Balance', 'iconCode': 0xe0b2, 'type': 'income'},
       {'name': 'Salary', 'iconCode': 0xe1af, 'type': 'income'},
       {'name': 'Food', 'iconCode': 0xe25a, 'type': 'expense'},
       {'name': 'Transport', 'iconCode': 0xe1d1, 'type': 'expense'},
