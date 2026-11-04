@@ -443,6 +443,15 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
 
   // --- Transaction Methods ---
   Future<void> fetchTransactions() async {
+    final db = await DatabaseHelper.instance.database;
+    await db.rawUpdate('''
+      UPDATE transactions 
+      SET type = 'cashWithdrawal',
+          toWalletId = COALESCE(toWalletId, (SELECT id FROM wallets WHERE isDefault = 1 LIMIT 1))
+      WHERE (type = 'expense' OR type = 'transfer')
+        AND (title LIKE 'Withdraw%' OR title LIKE '% - Cash')
+        AND categoryId IS NULL
+    ''');
     final data = await DatabaseHelper.instance.queryAll('transactions');
     _transactions = data.map((e) => TransactionModel.fromMap(e)).toList();
     notifyListeners();
@@ -1997,7 +2006,10 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         final rawNote = row['note']?.toString() ?? '';
         final rawTitleCategory = row['titleCategory']?.toString() ?? 'General';
         final typeLabel = row['transectionType']?.toString() ?? 'Expense';
-        final type = _getTypeFromLabel(typeLabel);
+        var type = _getTypeFromLabel(typeLabel);
+        if (type == TransactionType.expense && rawTitleCategory.toLowerCase().startsWith('withdraw')) {
+          type = TransactionType.cashWithdrawal;
+        }
         final rawWalletName = row['walletName']?.toString() ?? 'Cash';
         final cleanWalletName = SyncService.stripTabPrefix(rawWalletName);
 
@@ -2014,6 +2026,9 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
           walletId = localTx['walletId'] as int? ?? 0;
           toWalletId = localTx['toWalletId'] as int?;
           categoryId = localTx['categoryId'] as int?;
+          if (type == TransactionType.cashWithdrawal && (toWalletId == null || toWalletId == 0)) {
+            toWalletId = await _getDefaultWalletIdInTx(txn);
+          }
         } else {
           final entityTitle = _extractName(rawTitleCategory);
           if (pendingDeleteTabs.contains(entityTitle.toLowerCase()) ||
@@ -2023,29 +2038,40 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
             continue;
           }
 
-          if (type == TransactionType.transfer && rawTitleCategory.isNotEmpty) {
-            if (rawTitleCategory.contains(' - ')) {
-              final parts = rawTitleCategory.split(' - ');
+          if ((type == TransactionType.transfer || type == TransactionType.cashWithdrawal) && rawTitleCategory.isNotEmpty) {
+            String titleClean = rawTitleCategory;
+            if (titleClean.toLowerCase().startsWith('withdraw from ')) {
+              titleClean = titleClean.substring(14).trim();
+            }
+            if (titleClean.contains(' - ')) {
+              final parts = titleClean.split(' - ');
               final sourceName = SyncService.stripTabPrefix(parts[0].trim());
               final targetName = parts.length > 1 ? SyncService.stripTabPrefix(parts[1].trim()) : '';
               walletId = await _getOrCreateWalletIdInTx(txn, sourceName);
               if (targetName.isNotEmpty && targetName.toLowerCase() != sourceName.toLowerCase()) {
                 toWalletId = await _getOrCreateWalletIdInTx(txn, targetName);
+              } else if (type == TransactionType.cashWithdrawal) {
+                toWalletId = await _getDefaultWalletIdInTx(txn);
               }
-            } else if (rawTitleCategory.startsWith('To ')) {
+            } else if (titleClean.startsWith('To ')) {
               walletId = await _getOrCreateWalletIdInTx(txn, cleanWalletName);
-              final targetName = SyncService.stripTabPrefix(rawTitleCategory.substring(3).trim());
+              final targetName = SyncService.stripTabPrefix(titleClean.substring(3).trim());
               if (targetName.isNotEmpty && targetName.toLowerCase() != cleanWalletName.toLowerCase()) {
                 toWalletId = await _getOrCreateWalletIdInTx(txn, targetName);
+              } else if (type == TransactionType.cashWithdrawal) {
+                toWalletId = await _getDefaultWalletIdInTx(txn);
               }
-            } else if (rawTitleCategory.startsWith('From ')) {
-              final sourceName = SyncService.stripTabPrefix(rawTitleCategory.substring(5).trim());
+            } else if (titleClean.startsWith('From ')) {
+              final sourceName = SyncService.stripTabPrefix(titleClean.substring(5).trim());
               if (sourceName.isNotEmpty && sourceName.toLowerCase() != cleanWalletName.toLowerCase()) {
                 walletId = await _getOrCreateWalletIdInTx(txn, sourceName);
               }
               toWalletId = await _getOrCreateWalletIdInTx(txn, cleanWalletName);
             } else {
               walletId = await _getOrCreateWalletIdInTx(txn, cleanWalletName);
+              if (type == TransactionType.cashWithdrawal) {
+                toWalletId = await _getDefaultWalletIdInTx(txn);
+              }
             }
           } else {
             if (cleanWalletName != 'N/A' && cleanWalletName != 'Investment Principal' && cleanWalletName != 'None' && cleanWalletName != 'Loans' && cleanWalletName.isNotEmpty) {
@@ -2219,8 +2245,12 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
     }
 
     // 3. Title/Category comparison (normalized)
-    final localTitle = (localTx['title']?.toString() ?? '').trim().toLowerCase();
-    final remoteTitle = (remoteRow['titleCategory']?.toString() ?? '').trim().toLowerCase();
+    String localTitle = (localTx['title']?.toString() ?? '').trim().toLowerCase();
+    String remoteTitle = (remoteRow['titleCategory']?.toString() ?? '').trim().toLowerCase();
+    if (resolvedRemoteType == TransactionType.cashWithdrawal || (localTx['type']?.toString().toLowerCase() == 'cashwithdrawal')) {
+      if (localTitle.startsWith('withdraw from ')) localTitle = localTitle.substring(14).trim();
+      if (remoteTitle.startsWith('withdraw from ')) remoteTitle = remoteTitle.substring(14).trim();
+    }
     if (localTitle != remoteTitle) {
       diffs.add('Title/Category (Local: "${localTx['title']}", Sheet: "${remoteRow['titleCategory']}")');
     }
@@ -2408,7 +2438,9 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
       return {
         "id": tx.syncId,
         "date": "${tx.date.day.toString().padLeft(2, '0')}-${tx.date.month.toString().padLeft(2, '0')}-${tx.date.year.toString().substring(2)}",
-        "titleCategory": "${fromWallet.name} - ${toWallet.name}",
+        "titleCategory": tx.type == TransactionType.cashWithdrawal
+            ? "Withdraw from ${fromWallet.name} - ${toWallet.name}"
+            : "${fromWallet.name} - ${toWallet.name}",
         "transectionType": _getTransectionTypeLabel(tx.type),
         "amount": tx.amount,
         "note": tx.note,
@@ -2592,6 +2624,12 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         return TransactionType.savingsWithdrawal;
       case "Cash Withdrawal":
       case "cash withdrawal":
+      case "Cash Withdraw":
+      case "cash withdraw":
+      case "Withdraw":
+      case "withdraw":
+      case "cashwithdrawal":
+      case "cashWithdrawal":
         return TransactionType.cashWithdrawal;
       default:
         for (var t in TransactionType.values) {

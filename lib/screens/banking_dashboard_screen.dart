@@ -14,6 +14,7 @@ import 'package:financeapp/services/auth_service.dart';
 import 'package:financeapp/models/transaction_model.dart';
 import 'package:financeapp/widgets/transaction_item.dart';
 import 'package:financeapp/widgets/update_checker.dart';
+import 'package:financeapp/providers/update_provider.dart';
 
 import 'package:financeapp/main.dart';
 
@@ -294,8 +295,12 @@ class DashboardHeader extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Welcome Back,',
+                  Text(
+                    context.watch<UpdateProvider>().updateInfo.currentVersion.isNotEmpty
+                        ? (context.watch<UpdateProvider>().updateInfo.currentVersion.toLowerCase().startsWith('v')
+                            ? context.watch<UpdateProvider>().updateInfo.currentVersion
+                            : 'v${context.watch<UpdateProvider>().updateInfo.currentVersion}')
+                        : 'v1.0.2+29',
                     style: AppTypography.caption,
                   ),
                   const SizedBox(height: 0),

@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 9,
+      version: 10,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -138,6 +138,20 @@ class DatabaseHelper {
           'type': 'income',
         });
       }
+    }
+    if (oldVersion < 10) {
+      await db.execute('''
+        UPDATE transactions 
+        SET type = 'cashWithdrawal' 
+        WHERE (type = 'expense' OR type = 'transfer') 
+          AND (title LIKE 'Withdraw%' OR title LIKE '% - Cash')
+          AND categoryId IS NULL
+      ''');
+      await db.execute('''
+        UPDATE transactions 
+        SET toWalletId = (SELECT id FROM wallets WHERE isDefault = 1 LIMIT 1)
+        WHERE type = 'cashWithdrawal' AND (toWalletId IS NULL OR toWalletId = 0)
+      ''');
     }
   }
 

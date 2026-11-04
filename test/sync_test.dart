@@ -60,6 +60,9 @@ void main() {
       expect(SyncService.parseType(null, 'Profit Added'), equals(TransactionType.investmentProfit));
       expect(SyncService.parseType(null, 'Diposit'), equals(TransactionType.income));
       expect(SyncService.parseType(null, 'Transferred'), equals(TransactionType.transfer));
+      expect(SyncService.parseType(null, 'Withdraw'), equals(TransactionType.cashWithdrawal));
+      expect(SyncService.parseType(null, 'Cash Withdrawal'), equals(TransactionType.cashWithdrawal));
+      expect(SyncService.parseType('cashWithdrawal', null), equals(TransactionType.cashWithdrawal));
     });
 
     test('parseDate handles various formats', () {
@@ -126,6 +129,16 @@ void main() {
       );
       expect(tabs, contains('Wallet-Cash'));
       expect(tabs, contains('Wallet-bKash'));
+    });
+
+    test('Cash withdrawal transactions map to both source and destination wallet tabs', () {
+      final tabs = SyncService.getTabsForTransaction(
+        TransactionType.cashWithdrawal,
+        'City Bank',
+        secondaryTabName: 'Cash',
+      );
+      expect(tabs, contains('Wallet-City Bank'));
+      expect(tabs, contains('Wallet-Cash'));
     });
 
     test('Standard income/expense maps to single wallet tab', () {

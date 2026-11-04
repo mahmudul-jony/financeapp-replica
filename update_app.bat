@@ -83,18 +83,19 @@ if !COUNT! GTR 1 (
 echo Target phone: !DEVICE!
 echo.
 
+
 :: Increment pubspec.yaml version code
 echo Updating app version...
 
 set "NEW_VERSION="
 
-for /f "delims=" %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='pubspec.yaml'; $c=[System.IO.File]::ReadAllText($p); $r='(?m)^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$'; $m=[regex]::Match($c,$r); if (!$m.Success) { Write-Error 'Invalid version format in pubspec.yaml'; exit 1 }; $n=[int]$m.Groups[2].Value + 1; $v=$m.Groups[1].Value + '+' + $n; $u=[regex]::Replace($c,$r,('version: ' + $v),1); [System.IO.File]::WriteAllText($p,$u,(New-Object System.Text.UTF8Encoding($false))); Write-Output $v"') do (
+for /f "delims=" %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='pubspec.yaml'; $c=[IO.File]::ReadAllText($p); $r='(?m)^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$'; $m=[regex]::Match($c,$r); if (-not $m.Success) { throw 'Invalid version format in pubspec.yaml' }; $n=[int]$m.Groups[2].Value + 1; $new=$m.Groups[1].Value + '+' + $n; $c=[regex]::Replace($c,$r,('version: ' + $new),1); [IO.File]::WriteAllText($p,$c,(New-Object System.Text.UTF8Encoding($false))); Write-Output $new"') do (
     set "NEW_VERSION=%%A"
 )
 
 if not defined NEW_VERSION (
     echo.
-    echo ERROR: Could not update pubspec.yaml version!
+    echo ERROR: Version increment failed!
     pause
     exit /b 1
 )

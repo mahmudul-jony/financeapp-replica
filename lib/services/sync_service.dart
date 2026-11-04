@@ -112,7 +112,7 @@ class SyncService {
       if (l == 'savings created') return TransactionType.savingsCreated;
       if (l == 'savings increased') return TransactionType.savingsIncreased;
       if (l == 'savings withdraw' || l == 'savings withdrawn' || l == 'savings withdrawal') return TransactionType.savingsWithdrawal;
-      if (l == 'cash withdrawal') return TransactionType.cashWithdrawal;
+      if (l == 'withdraw' || l == 'cash withdrawal' || l == 'cash withdraw' || l == 'cashwithdrawal') return TransactionType.cashWithdrawal;
     }
     return TransactionType.expense;
   }
