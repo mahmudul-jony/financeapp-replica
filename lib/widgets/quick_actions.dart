@@ -15,10 +15,10 @@ class QuickActionsGrid extends StatelessWidget {
   const QuickActionsGrid({super.key});
 
   static const List<QuickAction> actions = [
-    QuickAction('Add Money', Icons.account_balance_wallet_outlined),
     QuickAction('Add Expense', Icons.note_add_outlined),
-    QuickAction('Transfer', Icons.swap_calls_outlined),
+    QuickAction('Diposit', Icons.account_balance_wallet_outlined),
     QuickAction('Withdraw', Icons.local_atm_outlined),
+    QuickAction('Transfer', Icons.swap_calls_outlined),
     QuickAction('Loans', Icons.real_estate_agent_outlined),
     QuickAction('Investments', Icons.analytics_outlined),
     QuickAction('Savings', Icons.savings_outlined),
@@ -28,7 +28,7 @@ class QuickActionsGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<FinanceProvider>();
-    final walletCount = provider.wallets.length;
+    final nonDefaultWalletsCount = provider.activeWallets.where((w) => !w.isDefault).length;
     final nonCashWalletsCount = provider.activeWallets
         .where((w) => !w.isDefault && w.name.toLowerCase() != 'cash')
         .length;
@@ -43,12 +43,12 @@ class QuickActionsGrid extends StatelessWidget {
             bool isDisabled = false;
             String disabledReason = '';
 
-            if (action.label == 'Transfer' && walletCount < 2) {
+            if (action.label == 'Transfer' && nonDefaultWalletsCount < 2) {
               isDisabled = true;
-              disabledReason = 'Add at least 2 wallets to use Transfer';
+              disabledReason = 'Add at least 2 accounts to use Transfer';
             } else if (action.label == 'Withdraw' && nonCashWalletsCount == 0) {
               isDisabled = true;
-              disabledReason = 'Add a Bank or MFS wallet to use Withdraw';
+              disabledReason = 'Withdrawals are only available for additional accounts.';
             } else if (action.label == 'Assets') {
               isDisabled = true;
               disabledReason = 'Assets feature coming soon';
@@ -66,7 +66,7 @@ class QuickActionsGrid extends StatelessWidget {
                   }
                   if (action.label == 'Add Expense') {
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const AddExpenseScreen()));
-                  } else if (action.label == 'Add Money') {
+                  } else if (action.label == 'Diposit') {
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const AddMoneyScreen()));
                   } else if (action.label == 'Transfer') {
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const TransferScreen()));

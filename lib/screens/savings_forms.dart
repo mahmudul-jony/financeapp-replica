@@ -141,11 +141,11 @@ class _SavingsActionScreenState extends State<SavingsActionScreen> {
                           if (widget.action == SavingsAction.withdraw && wallets.isEmpty && !_isLoading)
                             const Padding(
                               padding: EdgeInsets.symmetric(vertical: 20),
-                              child: Text("No wallets have allocations for this savings goal.", style: TextStyle(color: Colors.red)),
+                              child: Text("No accounts have allocations for this savings goal.", style: TextStyle(color: Colors.red)),
                             )
                           else
                             AppWalletSelector(
-                            selectedAccount: _selectedWallet?.name ?? 'Select Wallet', 
+                            selectedAccount: _selectedWallet?.name ?? 'Select Account', 
                             onSelect: (n) {
                               setState(() => _selectedWallet = wallets.firstWhere((w) => w.name == n));
                               if (widget.action == SavingsAction.withdraw) _updateAllocation();
@@ -156,7 +156,7 @@ class _SavingsActionScreenState extends State<SavingsActionScreen> {
                             Padding(
                               padding: const EdgeInsets.only(top: 8, left: 4),
                               child: Text(
-                                'Available for Goal in this Wallet: ${AppFormat.currency(_currentAllocation)}',
+                                'Available for Goal in this Account: ${AppFormat.currency(_currentAllocation)}',
                                 style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 13),
                               ),
                             ),

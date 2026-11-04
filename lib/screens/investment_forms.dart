@@ -146,7 +146,7 @@ class _InvestmentActionScreenState extends State<InvestmentActionScreen> {
                                             if (val != null) setState(() => _adjustmentSource = val);
                                           },
                                         ),
-                                        const Text('Wallet', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                                        const Text('Account', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                                       ],
                                     ),
                                   ),
@@ -184,7 +184,7 @@ class _InvestmentActionScreenState extends State<InvestmentActionScreen> {
                           if (_adjustmentSource == AdjustmentSource.wallet) ...[
                             const SizedBox(height: 12),
                             AppWalletSelector(
-                              selectedAccount: _selectedWallet?.name ?? 'Select Wallet', 
+                              selectedAccount: _selectedWallet?.name ?? 'Select Account', 
                               onSelect: (n) => setState(() => _selectedWallet = wallets.firstWhere((w) => w.name == n)), 
                               accounts: walletItems
                             ),
@@ -198,7 +198,7 @@ class _InvestmentActionScreenState extends State<InvestmentActionScreen> {
                         ] else if (widget.action != InvestmentAction.edit) ...[
                           const SizedBox(height: 16),
                           AppWalletSelector(
-                            selectedAccount: _selectedWallet?.name ?? 'Select Wallet', 
+                            selectedAccount: _selectedWallet?.name ?? 'Select Account', 
                             onSelect: (n) => setState(() => _selectedWallet = wallets.firstWhere((w) => w.name == n)), 
                             accounts: walletItems
                           ),
@@ -233,10 +233,10 @@ class _InvestmentActionScreenState extends State<InvestmentActionScreen> {
                               try {
                                 if (_adjustmentSource == AdjustmentSource.wallet) {
                                   if (_selectedWallet == null) {
-                                    throw Exception("Please select a wallet");
+                                    throw Exception("Please select an account");
                                   }
                                   if (amount > _selectedWallet!.balance) {
-                                    throw Exception("Amount exceeds wallet withdrawable balance");
+                                    throw Exception("Amount exceeds account withdrawable balance");
                                   }
                                   await provider.adjustInvestmentFromWallet(
                                     widget.investment!.id!, amount, _selectedWallet!.id!, _selectedDate, _noteController.text

@@ -384,7 +384,7 @@ class DatabaseHelper {
 
     // Insert Default Wallet
     await db.insert('wallets', {
-      'name': 'Main Wallet',
+      'name': 'Cash',
       'balance': 0.0,
       'color': 0xFF7F3DFF,
       'isDefault': 1,

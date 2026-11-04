@@ -487,11 +487,14 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
 
   Future<void> addTransfer(double amount, int fromWalletId, int toWalletId, DateTime date, String note) async {
     _validateAmount(amount);
-    if (fromWalletId == toWalletId) throw Exception("Source and destination wallets must be different");
+    if (fromWalletId == toWalletId) throw Exception("Source and destination accounts must be different");
+    final fromWallet = _wallets.firstWhere((w) => w.id == fromWalletId);
+    final toWallet = _wallets.firstWhere((w) => w.id == toWalletId);
+    if (fromWallet.isDefault || toWallet.isDefault) {
+      throw Exception("Transfers are not allowed for the default Cash wallet");
+    }
     await _ensureWalletActive(fromWalletId);
     await _ensureWalletActive(toWalletId);
-    
-    final fromWallet = _wallets.firstWhere((w) => w.id == fromWalletId);
     if (amount > fromWallet.balance) throw Exception("Insufficient withdrawable balance");
 
     final db = await DatabaseHelper.instance.database;
@@ -1767,7 +1770,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
 
   // --- Reset & Sync Logic ---
   Future<void> resetApp() async {
-    await SyncService.resetSheet(defaultWalletName: 'Wallet-Main Wallet');
+    await SyncService.resetSheet(defaultWalletName: 'Wallet-Cash');
     await DatabaseHelper.instance.resetDatabase();
     await fetchAll();
     _conflicts.clear();
@@ -1968,7 +1971,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         final rawTitleCategory = row['titleCategory']?.toString() ?? 'General';
         final typeLabel = row['transectionType']?.toString() ?? 'Expense';
         final type = _getTypeFromLabel(typeLabel);
-        final rawWalletName = row['walletName']?.toString() ?? 'Main Wallet';
+        final rawWalletName = row['walletName']?.toString() ?? 'Cash';
         final cleanWalletName = SyncService.stripTabPrefix(rawWalletName);
 
         final localTx = localMapBySyncId[remoteId];
@@ -2314,7 +2317,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
                 type: _getTypeFromLabel(payload['transectionType']?.toString() ?? 'Expense'),
                 walletId: 0,
               ),
-              payload['walletName']?.toString() ?? 'Main Wallet',
+              payload['walletName']?.toString() ?? 'Cash',
               payload['titleCategory']?.toString() ?? '',
               payload['transectionType']?.toString() ?? 'Expense',
               secondaryTabName: payload['secondaryTabName']?.toString(),
@@ -2490,6 +2493,10 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   TransactionType _getTypeFromLabel(String label) {
     final String clean = label.trim();
     switch (clean) {
+      case "Diposit":
+      case "deposit":
+      case "Deposit":
+      case "diposit":
       case "Money Added":
       case "Income":
       case "income":
@@ -2604,7 +2611,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
 
   String _getTransectionTypeLabel(TransactionType type) {
     switch (type) {
-      case TransactionType.income: return "Money Added";
+      case TransactionType.income: return "Diposit";
       case TransactionType.expense: return "Expense";
       case TransactionType.transfer: return "Transferred";
       case TransactionType.loanGiven: return "Loan Given";

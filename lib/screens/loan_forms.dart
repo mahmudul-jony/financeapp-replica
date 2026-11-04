@@ -78,7 +78,7 @@ class _CreateLoanScreenState extends State<CreateLoanScreen> {
                         AppTextField(hint: widget.isGiven ? 'Recipient Name' : 'Provider name', controller: _nameController),
                         const SizedBox(height: 12),
                         AppWalletSelector(
-                          selectedAccount: _selectedWallet?.name ?? 'Select Wallet', 
+                          selectedAccount: _selectedWallet?.name ?? 'Select Account', 
                           onSelect: (n) => setState(() => _selectedWallet = wallets.firstWhere((w) => w.name == n)), 
                           accounts: walletItems
                         ),
@@ -233,7 +233,7 @@ class _LoanActionScreenState extends State<LoanActionScreen> {
                         if (!isEdit) ...[
                           const SizedBox(height: 16),
                           AppWalletSelector(
-                            selectedAccount: _selectedWallet?.name ?? 'Select Wallet', 
+                            selectedAccount: _selectedWallet?.name ?? 'Select Account', 
                             onSelect: (n) => setState(() => _selectedWallet = wallets.firstWhere((w) => w.name == n)), 
                             accounts: walletItems
                           ),

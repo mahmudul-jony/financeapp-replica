@@ -104,7 +104,7 @@ class SyncService {
         tabs.add(walletTabName(wName));
       }
     } else {
-      final targetWallet = (wName.isNotEmpty && wName != 'N/A') ? wName : 'Main Wallet';
+      final targetWallet = (wName.isNotEmpty && wName != 'N/A') ? wName : 'Cash';
       tabs.add(walletTabName(targetWallet));
     }
 
@@ -328,7 +328,7 @@ class SyncService {
           final typeLabel = payload['transectionType']?.toString() ?? 'Expense';
           final amount = double.tryParse(payload['amount']?.toString() ?? '0') ?? 0.0;
           final note = payload['note']?.toString() ?? '';
-          final walletName = payload['walletName']?.toString() ?? 'Main Wallet';
+          final walletName = payload['walletName']?.toString() ?? 'Cash';
           final secTab = payload['secondaryTabName']?.toString();
 
           final tx = TransactionModel(
@@ -714,7 +714,7 @@ class SyncService {
 
   /// Wipes all non-default tabs and clears all transaction rows (row 2 downwards),
   /// leaving only default tabs ('Wallet-Main Wallet', 'Loans') with row 1 headers.
-  static Future<bool> resetSheet({String defaultWalletName = "Wallet-Main Wallet"}) async {
+  static Future<bool> resetSheet({String defaultWalletName = "Wallet-Cash"}) async {
     final headers = await AuthService().getAuthHeaders();
     final spreadsheetId = await DriveResourceService.instance.getSpreadsheetId();
     if (headers == null || spreadsheetId == null) return false;

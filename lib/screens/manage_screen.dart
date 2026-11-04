@@ -26,7 +26,7 @@ class ManageScreen extends StatelessWidget {
           icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.primaryText, size: 20), 
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('All Wallets', style: AppTypography.title),
+        title: const Text('All Accounts', style: AppTypography.title),
         centerTitle: false,
       ),
       body: Column(
@@ -34,7 +34,7 @@ class ManageScreen extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
             child: AppButton(
-              label: 'Add Wallet', 
+              label: 'Add Account', 
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CreateWalletScreen())),
             ),
           ),
@@ -49,7 +49,7 @@ class ManageScreen extends StatelessWidget {
                   bankName: w.name,
                   balance: AppFormat.currency(w.balance),
                   frozenAmount: AppFormat.currency(w.frozenAmount),
-                  maskedNumber: w.isDefault ? 'Default Wallet' : 'Personal Wallet',
+                  maskedNumber: w.isDefault ? 'Wallet' : 'Account',
                   accent: Color(w.color),
                 );
 

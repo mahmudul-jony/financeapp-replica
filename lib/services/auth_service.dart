@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:http/http.dart' as http;
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -38,6 +39,7 @@ class AuthService extends ChangeNotifier {
   String? _cachedGoogleDisplayName;
   String? _cachedGoogleEmail;
   String? _cachedGooglePhotoUrl;
+  String? _cachedLocalPhotoPath;
 
   GoogleSignInAccount? get currentUser => _currentUser;
   bool get isAuthenticated => _currentUser != null || (_cachedGoogleEmail != null && _cachedGoogleEmail!.isNotEmpty);
@@ -96,18 +98,37 @@ class AuthService extends ChangeNotifier {
     return '$first $last';
   }
 
-  String? get photoUrl => _customPhotoUrl ?? _currentUser?.photoUrl ?? _cachedGooglePhotoUrl;
+  String? get photoUrl => _customPhotoUrl ?? _cachedLocalPhotoPath ?? _currentUser?.photoUrl ?? _cachedGooglePhotoUrl;
 
   ImageProvider? get avatarImageProvider {
-    final url = photoUrl;
-    if (url == null || url.trim().isEmpty) return null;
-    final path = url.trim();
-    if (path.startsWith('http://') || path.startsWith('https://')) {
-      return NetworkImage(path);
+    if (_customPhotoUrl != null && _customPhotoUrl!.trim().isNotEmpty) {
+      final customPath = _customPhotoUrl!.trim();
+      if (customPath.startsWith('http://') || customPath.startsWith('https://')) {
+        return NetworkImage(customPath);
+      }
+      final file = File(customPath);
+      if (file.existsSync()) {
+        return FileImage(file);
+      }
     }
-    final file = File(path);
-    if (file.existsSync()) {
-      return FileImage(file);
+
+    if (_cachedLocalPhotoPath != null && _cachedLocalPhotoPath!.trim().isNotEmpty) {
+      final cachedFile = File(_cachedLocalPhotoPath!.trim());
+      if (cachedFile.existsSync()) {
+        return FileImage(cachedFile);
+      }
+    }
+
+    final url = _currentUser?.photoUrl ?? _cachedGooglePhotoUrl;
+    if (url != null && url.trim().isNotEmpty) {
+      final path = url.trim();
+      if (path.startsWith('http://') || path.startsWith('https://')) {
+        return NetworkImage(path);
+      }
+      final file = File(path);
+      if (file.existsSync()) {
+        return FileImage(file);
+      }
     }
     return null;
   }
@@ -211,6 +232,11 @@ class AuthService extends ChangeNotifier {
         _cachedGoogleDisplayName = data['display_name'] as String?;
         _cachedGoogleEmail = data['email'] as String?;
         _cachedGooglePhotoUrl = data['photo_url'] as String?;
+        _cachedLocalPhotoPath = data['local_photo_path'] as String?;
+      }
+      final defaultAvatar = File('${dir.path}/cached_google_avatar.png');
+      if ((_cachedLocalPhotoPath == null || !File(_cachedLocalPhotoPath!).existsSync()) && await defaultAvatar.exists()) {
+        _cachedLocalPhotoPath = defaultAvatar.path;
       }
     } catch (e) {
       debugPrint("Error loading google user cache: $e");
@@ -224,15 +250,31 @@ class AuthService extends ChangeNotifier {
 
     try {
       final dir = await getApplicationDocumentsDirectory();
+      if (account.photoUrl != null && account.photoUrl!.isNotEmpty) {
+        try {
+          final uri = Uri.parse(account.photoUrl!);
+          final response = await http.get(uri).timeout(const Duration(seconds: 8));
+          if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
+            final avatarFile = File('${dir.path}/cached_google_avatar.png');
+            await avatarFile.writeAsBytes(response.bodyBytes);
+            _cachedLocalPhotoPath = avatarFile.path;
+          }
+        } catch (imgErr) {
+          debugPrint("Error caching google avatar image: $imgErr");
+        }
+      }
+
       final file = File('${dir.path}/google_user_cache.json');
       await file.writeAsString(jsonEncode({
         'display_name': account.displayName,
         'email': account.email,
         'photo_url': account.photoUrl,
+        'local_photo_path': _cachedLocalPhotoPath,
       }));
     } catch (e) {
       debugPrint("Error caching google user: $e");
     }
+    notifyListeners();
   }
 
   Future<void> updateProfile({
@@ -274,6 +316,8 @@ class AuthService extends ChangeNotifier {
         return false;
       }
 
+      await _saveGoogleProfileCache(account);
+
       // Automatically find or create Financedatabase folder & Financedatasheet spreadsheet
       unawaited(DriveResourceService.instance.getOrCreateResources().catchError((e) {
         debugPrint("Error initializing drive resources: $e");
@@ -302,6 +346,17 @@ class AuthService extends ChangeNotifier {
       _currentUser = null;
       _isOfflineAtLaunch = false;
       DriveResourceService.instance.clearCache();
+      _cachedGoogleDisplayName = null;
+      _cachedGoogleEmail = null;
+      _cachedGooglePhotoUrl = null;
+      _cachedLocalPhotoPath = null;
+      try {
+        final dir = await getApplicationDocumentsDirectory();
+        final cacheFile = File('${dir.path}/google_user_cache.json');
+        if (await cacheFile.exists()) await cacheFile.delete();
+        final avatarFile = File('${dir.path}/cached_google_avatar.png');
+        if (await avatarFile.exists()) await avatarFile.delete();
+      } catch (_) {}
     } catch (e) {
       debugPrint("Sign-out error: $e");
       _errorMessage = "Sign-out failed: ${e.toString()}";

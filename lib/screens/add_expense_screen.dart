@@ -84,7 +84,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           AppWalletSelector(
-                            selectedAccount: _selectedWallet?.name ?? 'Select Wallet', 
+                            selectedAccount: _selectedWallet?.name ?? 'Select Account', 
                             onSelect: (name) => setState(() => _selectedWallet = wallets.firstWhere((w) => w.name == name)), 
                             accounts: walletItems
                           ),

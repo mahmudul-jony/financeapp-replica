@@ -485,7 +485,7 @@ class AppStaticWalletCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool isSelected = acc['name'] != 'Select' && acc['name'] != 'Select Wallet';
+    final bool isSelected = acc['name'] != 'Select' && acc['name'] != 'Select Wallet' && acc['name'] != 'Select Account';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -621,7 +621,8 @@ class AppSummaryInfoCard extends StatelessWidget {
 class AppErrorBanner extends StatefulWidget {
   final String? message;
   final VoidCallback? onDismissed;
-  const AppErrorBanner({this.message, this.onDismissed, super.key});
+  final bool isFloating;
+  const AppErrorBanner({this.message, this.onDismissed, this.isFloating = false, super.key});
 
   @override
   State<AppErrorBanner> createState() => _AppErrorBannerState();
@@ -671,6 +672,73 @@ class _AppErrorBannerState extends State<AppErrorBanner> {
   @override
   Widget build(BuildContext context) {
     if (_visibleMessage == null || _visibleMessage!.isEmpty) return const SizedBox.shrink();
+
+    if (widget.isFloating) {
+      return SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Material(
+            color: Colors.transparent,
+            elevation: 8,
+            shadowColor: Colors.black.withOpacity(0.35),
+            borderRadius: BorderRadius.circular(14),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.18),
+                  width: 1.2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.25),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.warning_amber_rounded,
+                    color: Color(0xFFFBBF24),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      _visibleMessage!,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.1,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: _hideBanner,
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.close_rounded, size: 14, color: Colors.white70),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return Material(
       color: Colors.transparent,
       child: Container(

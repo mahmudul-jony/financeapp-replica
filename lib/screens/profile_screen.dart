@@ -47,9 +47,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final String displayName = authService.displayName.isNotEmpty
         ? authService.displayName
         : 'Mahmudul Hasan';
-    final String email = (authService.currentUser?.email != null && authService.currentUser!.email.isNotEmpty)
-        ? authService.currentUser!.email
-        : 'mahmudul@example.com';
+    final String email = authService.email.isNotEmpty ? authService.email : 'user@example.com';
 
     return Column(
       children: [
@@ -253,8 +251,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 currentAvatar = FileImage(f);
               }
             }
-          } else if (authService.currentUser?.photoUrl != null) {
-            currentAvatar = NetworkImage(authService.currentUser!.photoUrl!);
+          } else if (authService.avatarImageProvider != null) {
+            currentAvatar = authService.avatarImageProvider;
           }
 
           return AlertDialog(
@@ -432,7 +430,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: const Text('Reset All Data?'),
-        content: const Text('This will delete all your wallets, transactions, loans, and settings. This action cannot be undone.'),
+        content: const Text('This will delete all your accounts, transactions, loans, and settings. This action cannot be undone.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           TextButton(

@@ -263,7 +263,7 @@ function doPost(e) {
       var sheets = ss.getSheets();
       for (var rIdx = 0; rIdx < sheets.length; rIdx++) {
         if (rIdx === 0) {
-          sheets[rIdx].setName("Main Wallet");
+          sheets[rIdx].setName("Cash");
           sheets[rIdx].clear();
           addHeaders(sheets[rIdx]);
         } else {
@@ -282,7 +282,7 @@ function doPost(e) {
 }
 
 function upsertTransaction(ss, payload) {
-  var walletName = payload.walletName || "Main Wallet";
+  var walletName = payload.walletName || "Cash";
   var secondaryTabName = payload.secondaryTabName || null;
 
   // 1. Write / Update Primary Wallet Tab

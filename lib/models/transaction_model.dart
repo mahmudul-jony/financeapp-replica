@@ -89,7 +89,7 @@ class TransactionModel {
   String get displayLabel {
     switch (type) {
       case TransactionType.income:
-        return 'Money Added';
+        return 'Diposit';
       case TransactionType.expense:
         return 'Expense';
       case TransactionType.transfer:

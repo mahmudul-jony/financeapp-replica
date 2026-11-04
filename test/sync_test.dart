@@ -13,8 +13,8 @@ void main() {
 
   group('SyncService Tab Naming & Prefix Tests (Requirement 6)', () {
     test('walletTabName formats prefix correctly', () {
-      expect(SyncService.walletTabName('Main Wallet'), equals('Wallet-Main Wallet'));
-      expect(SyncService.walletTabName('Wallet-Main Wallet'), equals('Wallet-Main Wallet'));
+      expect(SyncService.walletTabName('Cash'), equals('Wallet-Cash'));
+      expect(SyncService.walletTabName('Wallet-Cash'), equals('Wallet-Cash'));
       expect(SyncService.walletTabName('bKash'), equals('Wallet-bKash'));
     });
 
@@ -29,7 +29,7 @@ void main() {
     });
 
     test('stripTabPrefix strips Wallet-, Saving-, and Invest- prefixes', () {
-      expect(SyncService.stripTabPrefix('Wallet-Main Wallet'), equals('Main Wallet'));
+      expect(SyncService.stripTabPrefix('Wallet-Cash'), equals('Cash'));
       expect(SyncService.stripTabPrefix('Saving-Emergency Fund'), equals('Emergency Fund'));
       expect(SyncService.stripTabPrefix('Invest-Crypto'), equals('Crypto'));
       expect(SyncService.stripTabPrefix('Loans'), equals('Loans'));
@@ -39,44 +39,44 @@ void main() {
 
   group('SyncService Multi-tab Transaction Resolution Tests (Requirements 1, 2)', () {
     test('Loan transactions map to Loans and Wallet tabs', () {
-      final tabs = SyncService.getTabsForTransaction(TransactionType.loanGiven, 'Main Wallet');
+      final tabs = SyncService.getTabsForTransaction(TransactionType.loanGiven, 'Cash');
       expect(tabs, contains('Loans'));
-      expect(tabs, contains('Wallet-Main Wallet'));
+      expect(tabs, contains('Wallet-Cash'));
     });
 
     test('Savings transactions map to dedicated Saving tab and Wallet tab', () {
       final tabs = SyncService.getTabsForTransaction(
         TransactionType.savingsCreated,
-        'Main Wallet',
+        'Cash',
         secondaryTabName: 'Emergency Fund',
       );
       expect(tabs, contains('Saving-Emergency Fund'));
-      expect(tabs, contains('Wallet-Main Wallet'));
+      expect(tabs, contains('Wallet-Cash'));
     });
 
     test('Investment transactions map to dedicated Invest tab and Wallet tab', () {
       final tabs = SyncService.getTabsForTransaction(
         TransactionType.investmentCreated,
-        'Main Wallet',
+        'Cash',
         secondaryTabName: 'Crypto Portfolio',
       );
       expect(tabs, contains('Invest-Crypto Portfolio'));
-      expect(tabs, contains('Wallet-Main Wallet'));
+      expect(tabs, contains('Wallet-Cash'));
     });
 
     test('Transfer transactions map to both source and destination wallet tabs', () {
       final tabs = SyncService.getTabsForTransaction(
         TransactionType.transfer,
-        'Main Wallet',
+        'Cash',
         secondaryTabName: 'bKash',
       );
-      expect(tabs, contains('Wallet-Main Wallet'));
+      expect(tabs, contains('Wallet-Cash'));
       expect(tabs, contains('Wallet-bKash'));
     });
 
     test('Standard income/expense maps to single wallet tab', () {
-      final tabs = SyncService.getTabsForTransaction(TransactionType.expense, 'Main Wallet');
-      expect(tabs, equals(['Wallet-Main Wallet']));
+      final tabs = SyncService.getTabsForTransaction(TransactionType.expense, 'Cash');
+      expect(tabs, equals(['Wallet-Cash']));
     });
   });
 }

@@ -103,16 +103,6 @@ class _BankingDashboardScreenState extends State<BankingDashboardScreen> with Ro
               ),
             ),
           ),
-          if (provider.noticeMessage != null)
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: AppErrorBanner(
-                message: provider.noticeMessage,
-                onDismissed: () => provider.clearNoticeMessage(),
-              ),
-            ),
           if (provider.isSyncing)
             const Positioned(
               top: 0,
@@ -186,6 +176,17 @@ class _BankingDashboardScreenState extends State<BankingDashboardScreen> with Ro
               ),
             ),
           ),
+          if (provider.noticeMessage != null)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: AppErrorBanner(
+                message: provider.noticeMessage,
+                isFloating: true,
+                onDismissed: () => provider.clearNoticeMessage(),
+              ),
+            ),
         ],
       ),
     );

@@ -29,7 +29,7 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
       appBar: AppBar(
         backgroundColor: Colors.white, elevation: 0,
         leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new, size: 20, color: AppColors.primaryText), onPressed: () => Navigator.pop(context)),
-        title: const Text('Add Wallet', style: AppTypography.title), centerTitle: false,
+        title: const Text('Add Account', style: AppTypography.title), centerTitle: false,
       ),
       body: Column(
         children: [
@@ -43,7 +43,7 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  AppTextField(hint: 'Wallet name', controller: _nameController),
+                  AppTextField(hint: 'Account name', controller: _nameController),
                   AppSpacing.verticalGap,
                   AppTextField(hint: 'Initial Balance', controller: _balanceController, keyboardType: const TextInputType.numberWithOptions(decimal: true)),
                   AppSpacing.largeVerticalGap,
@@ -76,7 +76,7 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
                   ),
                   const Spacer(),
                   AppButton(
-                    label: 'Add Wallet',
+                    label: 'Add Account',
                     onTap: () {
                       setState(() => _errorMessage = null);
                       final balanceText = _balanceController.text.trim();
@@ -91,7 +91,7 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
                         context.read<FinanceProvider>().addWallet(wallet);
                         Navigator.pop(context);
                       } else if (_nameController.text.isEmpty) {
-                        setState(() => _errorMessage = "Please enter a wallet name");
+                        setState(() => _errorMessage = "Please enter an account name");
                       }
                     }
                   ),
@@ -135,7 +135,7 @@ class _EditWalletScreenState extends State<EditWalletScreen> {
       appBar: AppBar(
         backgroundColor: Colors.white, elevation: 0,
         leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new, size: 20, color: AppColors.primaryText), onPressed: () => Navigator.pop(context)),
-        title: const Text('Edit Wallet', style: AppTypography.title), centerTitle: false,
+        title: Text(widget.wallet.isDefault ? 'Edit Wallet' : 'Edit Account', style: AppTypography.title), centerTitle: false,
         actions: [
           if (!widget.wallet.isDefault)
             AppDeleteIconButton(onTap: () => _showDeleteConfirmation(context)),
@@ -147,7 +147,7 @@ class _EditWalletScreenState extends State<EditWalletScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AppTextField(hint: 'Wallet name', controller: _nameController),
+            AppTextField(hint: 'Account name', controller: _nameController),
             AppSpacing.largeVerticalGap,
             const Text('Choose Color', style: AppTypography.subTitle),
             const SizedBox(height: 8),
@@ -178,7 +178,7 @@ class _EditWalletScreenState extends State<EditWalletScreen> {
             ),
             const Spacer(),
             AppButton(
-              label: 'Update Wallet', 
+              label: widget.wallet.isDefault ? 'Update Wallet' : 'Update Account', 
               onTap: () {
                 if (_nameController.text.isNotEmpty) {
                   final updatedWallet = Wallet(
@@ -205,10 +205,10 @@ class _EditWalletScreenState extends State<EditWalletScreen> {
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Text(widget.wallet.balance > 0 || widget.wallet.frozenAmount > 0 ? 'Archive Wallet?' : 'Delete Wallet?'),
+        title: Text(widget.wallet.balance > 0 || widget.wallet.frozenAmount > 0 ? (widget.wallet.isDefault ? 'Archive Wallet?' : 'Archive Account?') : (widget.wallet.isDefault ? 'Delete Wallet?' : 'Delete Account?')),
         content: Text(widget.wallet.balance > 0 || widget.wallet.frozenAmount > 0 
-            ? 'This wallet has a balance or history. It will be archived and hidden from selection but preserved in reports.'
-            : 'This will permanently delete this wallet.'),
+            ? 'This account has a balance or history. It will be archived and hidden from selection but preserved in reports.'
+            : 'This will permanently delete this account.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel', style: TextStyle(color: AppColors.secondaryText))),
           TextButton(

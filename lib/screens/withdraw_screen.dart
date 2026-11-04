@@ -101,10 +101,10 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           if (_isSelectingSource) ...[
-                            const Text('Select Withdraw From', style: AppTypography.caption),
+                            const Text('Select Withdraw From Account', style: AppTypography.caption),
                             const SizedBox(height: 6),
                             AppWalletSelector(
-                              selectedAccount: _sourceWallet?.name ?? 'Select Wallet',
+                              selectedAccount: _sourceWallet?.name ?? 'Select Account',
                               onSelect: (name) => setState(() {
                                 _sourceWallet = withdrawableWallets.firstWhere((w) => w.name == name);
                                 _isSelectingSource = false;
@@ -122,7 +122,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                                       'balance': AppFormat.currency(_sourceWallet!.balance - _sourceWallet!.frozenAmount),
                                       'color': Color(_sourceWallet!.color),
                                     } : {'name': 'Select', 'balance': '0', 'color': Colors.grey},
-                                    label: 'Withdraw From',
+                                    label: 'Withdraw From Account',
                                     onTap: () {
                                       if (withdrawableWallets.isNotEmpty) {
                                         setState(() => _isSelectingSource = true);

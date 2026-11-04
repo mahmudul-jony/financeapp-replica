@@ -66,7 +66,7 @@ class _AddMoneyScreenState extends State<AddMoneyScreen> {
         elevation: 0,
         scrolledUnderElevation: 0,
         leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.primaryText, size: 20), onPressed: () => Navigator.pop(context)),
-        title: const Text('Add Money', style: AppTypography.title), centerTitle: false,
+        title: const Text('Diposit', style: AppTypography.title), centerTitle: false,
       ),
       body: Column(
         children: [
@@ -86,7 +86,7 @@ class _AddMoneyScreenState extends State<AddMoneyScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           AppWalletSelector(
-                            selectedAccount: _selectedWallet?.name ?? 'Select Wallet', 
+                            selectedAccount: _selectedWallet?.name ?? 'Select Account', 
                             onSelect: (name) => setState(() => _selectedWallet = wallets.firstWhere((w) => w.name == name)), 
                             accounts: walletItems
                           ),
@@ -110,7 +110,7 @@ class _AddMoneyScreenState extends State<AddMoneyScreen> {
                           const SizedBox(height: 32),
                           
                           AppButton(
-                            label: 'Add Money', 
+                            label: 'Diposit', 
                             onTap: () async {
                               setState(() => _errorMessage = null);
                               final amount = double.tryParse(_amountController.text) ?? 0.0;

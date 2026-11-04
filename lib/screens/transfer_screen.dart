@@ -38,20 +38,23 @@ class _TransferScreenState extends State<TransferScreen> {
   Widget build(BuildContext context) {
     final provider = context.watch<FinanceProvider>();
     final wallets = provider.activeWallets;
+    final nonDefaultWallets = wallets.where((w) => !w.isDefault).toList();
 
-    if (_fromWallet == null && wallets.isNotEmpty) {
-      _fromWallet = wallets.firstWhere((w) => w.isDefault, orElse: () => wallets.first);
+    if (_fromWallet == null || _fromWallet!.isDefault) {
+      _fromWallet = nonDefaultWallets.isNotEmpty ? nonDefaultWallets.first : null;
     }
-    if (_toWallet == null && wallets.length > 1) {
-      _toWallet = wallets.firstWhere((w) => w.id != _fromWallet?.id, orElse: () => wallets[1]);
+    if (_toWallet == null || _toWallet!.isDefault || _toWallet!.id == _fromWallet?.id) {
+      _toWallet = nonDefaultWallets.length > 1
+          ? nonDefaultWallets.firstWhere((w) => w.id != _fromWallet?.id, orElse: () => nonDefaultWallets[1])
+          : null;
     }
 
-    // Filter wallets for selector to avoid same wallet in both
-    List<Wallet> availableWallets = wallets;
+    // Filter wallets for selector: ONLY non-default wallets, and avoid same account in both
+    List<Wallet> availableWallets = nonDefaultWallets;
     if (_isSelectingFrom == true && _toWallet != null) {
-      availableWallets = wallets.where((w) => w.id != _toWallet!.id).toList();
+      availableWallets = nonDefaultWallets.where((w) => w.id != _toWallet!.id).toList();
     } else if (_isSelectingFrom == false && _fromWallet != null) {
-      availableWallets = wallets.where((w) => w.id != _fromWallet!.id).toList();
+      availableWallets = nonDefaultWallets.where((w) => w.id != _fromWallet!.id).toList();
     }
 
     final walletItems = availableWallets.map((w) => {
@@ -94,15 +97,15 @@ class _TransferScreenState extends State<TransferScreen> {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(_isSelectingFrom! ? 'Select From Wallet' : 'Select To Wallet', style: AppTypography.caption),
+                                Text(_isSelectingFrom! ? 'Select From Account' : 'Select To Account', style: AppTypography.caption),
                                 const SizedBox(height: 6),
                                 AppWalletSelector(
-                                  selectedAccount: (_isSelectingFrom! ? _fromWallet?.name : _toWallet?.name) ?? 'Select Wallet', 
+                                  selectedAccount: (_isSelectingFrom! ? _fromWallet?.name : _toWallet?.name) ?? 'Select Account', 
                                   onSelect: (name) => setState(() {
                                     if (_isSelectingFrom!) {
-                                      _fromWallet = wallets.firstWhere((w) => w.name == name);
+                                      _fromWallet = nonDefaultWallets.firstWhere((w) => w.name == name);
                                     } else {
-                                      _toWallet = wallets.firstWhere((w) => w.name == name);
+                                      _toWallet = nonDefaultWallets.firstWhere((w) => w.name == name);
                                     }
                                     _isSelectingFrom = null;
                                   }), 
@@ -121,7 +124,7 @@ class _TransferScreenState extends State<TransferScreen> {
                                       'balance': AppFormat.currency(_fromWallet!.balance),
                                       'color': Color(_fromWallet!.color),
                                     } : {'name': 'Select', 'balance': '0', 'color': Colors.grey}, 
-                                    label: 'From Wallet', 
+                                    label: 'From Account', 
                                     onTap: () => setState(() => _isSelectingFrom = true)
                                   )
                                 ),
@@ -148,7 +151,7 @@ class _TransferScreenState extends State<TransferScreen> {
                                       'balance': AppFormat.currency(_toWallet!.balance),
                                       'color': Color(_toWallet!.color),
                                     } : {'name': 'Select', 'balance': '0', 'color': Colors.grey}, 
-                                    label: 'To Wallet', 
+                                    label: 'To Account', 
                                     onTap: () => setState(() => _isSelectingFrom = false)
                                   )
                                 ),
@@ -172,6 +175,10 @@ class _TransferScreenState extends State<TransferScreen> {
                             onTap: () async {
                               setState(() => _errorMessage = null);
                               final amount = double.tryParse(_amountController.text) ?? 0.0;
+                              if (nonDefaultWallets.length < 2) {
+                                setState(() => _errorMessage = "At least 2 accounts are required to transfer");
+                                return;
+                              }
                               if (amount > 0 && _fromWallet != null && _toWallet != null && _fromWallet!.id != _toWallet!.id) {
                                 try {
                                   await provider.addTransfer(amount, _fromWallet!.id!, _toWallet!.id!, _selectedDate, _noteController.text);
@@ -184,7 +191,7 @@ class _TransferScreenState extends State<TransferScreen> {
                               } else if (amount <= 0) {
                                 setState(() => _errorMessage = "Amount must be greater than zero");
                               } else if (_fromWallet?.id == _toWallet?.id) {
-                                setState(() => _errorMessage = "Source and destination wallets must be different");
+                                setState(() => _errorMessage = "Source and destination accounts must be different");
                               }
                             }
                           ),

@@ -48,7 +48,7 @@ class DriveResourceService {
   ];
 
   static const List<String> defaultTabs = [
-    "Wallet-Main Wallet",
+    "Wallet-Cash",
     "Loans",
   ];
 
@@ -273,50 +273,50 @@ class DriveResourceService {
       final List<Map<String, dynamic>> requests = [];
 
       int? defaultWalletSheetId;
-      if (existingTabs.containsKey("Wallet-Main Wallet")) {
-        defaultWalletSheetId = existingTabs["Wallet-Main Wallet"];
+      if (existingTabs.containsKey("Wallet-Cash")) {
+        defaultWalletSheetId = existingTabs["Wallet-Cash"];
       } else if (existingTabs.containsKey("Main Wallet")) {
         defaultWalletSheetId = existingTabs["Main Wallet"];
         requests.add({
           "updateSheetProperties": {
             "properties": {
               "sheetId": defaultWalletSheetId,
-              "title": "Wallet-Main Wallet",
+              "title": "Wallet-Cash",
               "index": 0,
             },
             "fields": "title,index",
           }
         });
         existingTabs.remove("Main Wallet");
-        existingTabs["Wallet-Main Wallet"] = defaultWalletSheetId!;
+        existingTabs["Wallet-Cash"] = defaultWalletSheetId!;
       } else if (existingTabs.containsKey("Pocket")) {
         defaultWalletSheetId = existingTabs["Pocket"];
         requests.add({
           "updateSheetProperties": {
             "properties": {
               "sheetId": defaultWalletSheetId,
-              "title": "Wallet-Main Wallet",
+              "title": "Wallet-Cash",
               "index": 0,
             },
             "fields": "title,index",
           }
         });
         existingTabs.remove("Pocket");
-        existingTabs["Wallet-Main Wallet"] = defaultWalletSheetId!;
+        existingTabs["Wallet-Cash"] = defaultWalletSheetId!;
       } else if (existingTabs.containsKey("Sheet1")) {
         defaultWalletSheetId = existingTabs["Sheet1"];
         requests.add({
           "updateSheetProperties": {
             "properties": {
               "sheetId": defaultWalletSheetId,
-              "title": "Wallet-Main Wallet",
+              "title": "Wallet-Cash",
               "index": 0,
             },
             "fields": "title,index",
           }
         });
         existingTabs.remove("Sheet1");
-        existingTabs["Wallet-Main Wallet"] = defaultWalletSheetId!;
+        existingTabs["Wallet-Cash"] = defaultWalletSheetId!;
       }
 
       // Ensure default wallet is index 0
@@ -335,7 +335,7 @@ class DriveResourceService {
       // Add missing tabs from defaultTabs
       for (var tab in defaultTabs) {
         if (!existingTabs.containsKey(tab)) {
-          final targetIndex = tab == "Wallet-Main Wallet" ? 0 : 1;
+          final targetIndex = tab == "Wallet-Cash" ? 0 : 1;
           requests.add({
             "addSheet": {
               "properties": {
