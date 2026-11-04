@@ -1,3 +1,4 @@
+
 name: Build Finance App APK
 
 on:
@@ -6,6 +7,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: finance-app-versioning
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -13,6 +18,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          token: ${{ github.token }}
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -27,6 +35,67 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Increment Version Code
+        id: version_info
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          path = Path("pubspec.yaml")
+          content = path.read_text(encoding="utf-8")
+
+          pattern = r"(?m)^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$"
+          match = re.search(pattern, content)
+
+          if not match:
+              raise SystemExit("ERROR: Could not read version from pubspec.yaml")
+
+          version_name = match.group(1)
+          build_number = int(match.group(2)) + 1
+          full_version = f"{version_name}+{build_number}"
+
+          updated = re.sub(
+              pattern,
+              f"version: {full_version}",
+              content,
+              count=1
+          )
+
+          path.write_text(updated, encoding="utf-8")
+
+          print(f"Version updated to {full_version}")
+          PY
+
+          RAW_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | tr -d '\r')
+          VERSION_NAME="${RAW_VERSION%%+*}"
+          BUILD_NUMBER="${RAW_VERSION##*+}"
+          FULL_VERSION="${VERSION_NAME}+${BUILD_NUMBER}"
+
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "full_version=$FULL_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v${FULL_VERSION}" >> "$GITHUB_OUTPUT"
+
+          echo "Building version $FULL_VERSION"
+
+      - name: Commit Version Update
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add pubspec.yaml
+
+          git commit -m "Bump app version to ${{ steps.version_info.outputs.full_version }}"
+
+          git push origin "HEAD:${{ github.ref_name }}"
+
       - name: Restore Android signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -35,6 +104,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           test -n "$KEYSTORE_BASE64"
           test -n "$KEYSTORE_PASSWORD"
           test -n "$KEY_PASSWORD"
@@ -54,26 +124,8 @@ jobs:
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
 
-      - name: Determine Version and Build Number
-        id: version_info
-        shell: bash
-        run: |
-          set -euo pipefail
-          RAW_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | tr -d '\r')
-          VERSION_NAME=$(echo "$RAW_VERSION" | cut -d'+' -f1)
-          BUILD_NUMBER="${{ github.run_number }}"
-          FULL_VERSION="${VERSION_NAME}+${BUILD_NUMBER}"
-          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
-          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "full_version=$FULL_VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v${FULL_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Building version $FULL_VERSION (tag: v${FULL_VERSION})"
-
       - name: Build signed release APK
-        run: |
-          flutter build apk --release \
-            --build-name="${{ steps.version_info.outputs.version_name }}" \
-            --build-number="${{ steps.version_info.outputs.build_number }}"
+        run: flutter build apk --release
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -102,4 +154,5 @@ jobs:
           fi
 
           cp build/app/outputs/flutter-apk/app-release.apk financeapp.apk
+
           gh release upload "$TAG" financeapp.apk --clobber
