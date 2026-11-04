@@ -281,42 +281,126 @@ function doPost(e) {
   }
 }
 
+function resolveSheet(ss, sheetName) {
+  if (!sheetName) return null;
+  var name = sheetName.toString().trim();
+  if (!name) return null;
+
+  var sheet = ss.getSheetByName(name);
+  if (sheet) return sheet;
+
+  if (!name.startsWith("Wallet-") && !name.startsWith("Saving-") && !name.startsWith("Invest-")) {
+    sheet = ss.getSheetByName("Wallet-" + name);
+    if (sheet) return sheet;
+    sheet = ss.getSheetByName("Saving-" + name);
+    if (sheet) return sheet;
+    sheet = ss.getSheetByName("Invest-" + name);
+    if (sheet) return sheet;
+  }
+
+  if (name.startsWith("Wallet-")) {
+    sheet = ss.getSheetByName(name.substring(7));
+    if (sheet) return sheet;
+  } else if (name.startsWith("Saving-")) {
+    sheet = ss.getSheetByName(name.substring(7));
+    if (sheet) return sheet;
+  } else if (name.startsWith("Invest-")) {
+    sheet = ss.getSheetByName(name.substring(7));
+    if (sheet) return sheet;
+  }
+
+  return null;
+}
+
+function getOrCreateSheet(ss, sheetName, defaultPrefix) {
+  var existing = resolveSheet(ss, sheetName);
+  if (existing) return existing;
+
+  var targetName = sheetName.toString().trim();
+  if (defaultPrefix && !targetName.startsWith(defaultPrefix) && targetName !== "Loans") {
+    targetName = defaultPrefix + targetName;
+  }
+  return createSheetWithHeaders(ss, targetName);
+}
+
+function isLoanType(type, label) {
+  var t = (type || "").toLowerCase();
+  var l = (label || "").toLowerCase();
+  return t.indexOf("loan") !== -1 || l.indexOf("loan") !== -1;
+}
+
+function isSavingsType(type, label) {
+  var t = (type || "").toLowerCase();
+  var l = (label || "").toLowerCase();
+  return t.indexOf("saving") !== -1 || l.indexOf("saving") !== -1;
+}
+
+function isInvestmentType(type, label) {
+  var t = (type || "").toLowerCase();
+  var l = (label || "").toLowerCase();
+  return t.indexOf("invest") !== -1 || l.indexOf("invest") !== -1 || t.indexOf("profit") !== -1 || l.indexOf("profit") !== -1;
+}
+
 function upsertTransaction(ss, payload) {
   var walletName = payload.walletName || "Cash";
   var secondaryTabName = payload.secondaryTabName || null;
+  var typeLabel = payload.transectionType || "";
+  var rawType = payload.type || "";
+
+  var isLoan = isLoanType(rawType, typeLabel);
+  var isSaving = isSavingsType(rawType, typeLabel);
+  var isInvest = isInvestmentType(rawType, typeLabel);
 
   // 1. Write / Update Primary Wallet Tab
   if (walletName && walletName !== "N/A" && walletName !== "None") {
-    upsertTransactionRow(ss, walletName, payload);
+    var walletSheet = getOrCreateSheet(ss, walletName, "Wallet-");
+    upsertTransactionRowInSheet(walletSheet, payload);
   }
 
-  // 2. Write / Update Secondary Tab (transfers, investments, savings)
-  if (secondaryTabName && secondaryTabName !== walletName && secondaryTabName !== "N/A" && secondaryTabName !== "None") {
-    upsertTransactionRow(ss, secondaryTabName, payload);
+  // 2. Write / Update Loans Tab (for all loan transactions)
+  if (isLoan) {
+    var loansSheet = getOrCreateSheet(ss, "Loans", "");
+    upsertTransactionRowInSheet(loansSheet, payload);
   }
 
-  // 3. Write / Update "Loans" tab for loan transactions
-  var typeLabel = payload.transectionType || "";
-  if (typeLabel.indexOf("Loan") !== -1 || typeLabel.indexOf("loan") !== -1) {
-    if (secondaryTabName !== "Loans") {
-      upsertTransactionRow(ss, "Loans", payload);
+  // 3. Write / Update Savings Tab
+  if (isSaving) {
+    var savingName = secondaryTabName || payload.titleCategory || "";
+    if (savingName && savingName !== "N/A") {
+      var savingSheet = getOrCreateSheet(ss, savingName, "Saving-");
+      upsertTransactionRowInSheet(savingSheet, payload);
     }
+  }
+
+  // 4. Write / Update Investment Tab
+  if (isInvest) {
+    var investName = secondaryTabName || payload.titleCategory || "";
+    if (investName && investName !== "N/A") {
+      var investSheet = getOrCreateSheet(ss, investName, "Invest-");
+      upsertTransactionRowInSheet(investSheet, payload);
+    }
+  }
+
+  // 5. Transfer Secondary Tab
+  if (secondaryTabName && !isLoan && !isSaving && !isInvest && secondaryTabName !== walletName && secondaryTabName !== "N/A") {
+    var targetSheet = getOrCreateSheet(ss, secondaryTabName, "Wallet-");
+    upsertTransactionRowInSheet(targetSheet, payload);
   }
 }
 
 function upsertTransactionRow(ss, sheetName, payload) {
-  var sheet = ss.getSheetByName(sheetName);
-  if (!sheet) {
-    sheet = createSheetWithHeaders(ss, sheetName);
-  }
+  var sheet = getOrCreateSheet(ss, sheetName, "");
+  upsertTransactionRowInSheet(sheet, payload);
+}
 
+function upsertTransactionRowInSheet(sheet, payload) {
   var id = payload.id !== undefined && payload.id !== null ? payload.id.toString() : "";
   var date = payload.date || "";
   var titleCategory = payload.titleCategory || "";
   var transectionType = payload.transectionType || "";
   var amount = payload.amount !== undefined ? payload.amount : 0;
   var note = payload.note || "";
-  var walletName = payload.walletName || sheetName;
+  var walletName = payload.walletName || sheet.getName();
 
   var data = sheet.getDataRange().getValues();
   var foundRow = -1;
@@ -333,10 +417,8 @@ function upsertTransactionRow(ss, sheetName, payload) {
   var rowValues = [id, date, titleCategory, transectionType, amount, note, walletName];
 
   if (foundRow > 0) {
-    // Update existing row in place (Prevents duplicates on retry!)
     sheet.getRange(foundRow, 1, 1, 7).setValues([rowValues]);
   } else {
-    // Append new row
     sheet.appendRow(rowValues);
   }
 }

@@ -59,6 +59,92 @@ class SyncService {
     return trimmed;
   }
 
+    static bool isLoanTx(TransactionType type) {
+    return type == TransactionType.loanGiven ||
+        type == TransactionType.loanGivenMore ||
+        type == TransactionType.loanRecovered ||
+        type == TransactionType.loanTaken ||
+        type == TransactionType.loanTakenMore ||
+        type == TransactionType.loanRepaid;
+  }
+
+  static bool isSavingsTx(TransactionType type) {
+    return type == TransactionType.savingsCreated ||
+        type == TransactionType.savingsIncreased ||
+        type == TransactionType.savingsWithdrawal;
+  }
+
+  static bool isInvestmentTx(TransactionType type) {
+    return type == TransactionType.investmentCreated ||
+        type == TransactionType.investmentIncreased ||
+        type == TransactionType.investmentProfit ||
+        type == TransactionType.investmentWithdraw ||
+        type == TransactionType.investmentExpense ||
+        type == TransactionType.investmentAdjustment;
+  }
+
+  static TransactionType parseType(dynamic typeValue, [String? typeLabel]) {
+    if (typeValue != null) {
+      final nameStr = typeValue.toString().trim();
+      for (var t in TransactionType.values) {
+        if (t.name.toLowerCase() == nameStr.toLowerCase()) {
+          return t;
+        }
+      }
+    }
+    if (typeLabel != null) {
+      final l = typeLabel.trim().toLowerCase();
+      if (l == 'diposit' || l == 'deposit' || l == 'money added' || l == 'income') return TransactionType.income;
+      if (l == 'expense' || l == 'expanse') return TransactionType.expense;
+      if (l == 'transferred' || l == 'transfer') return TransactionType.transfer;
+      if (l == 'loan given') return TransactionType.loanGiven;
+      if (l == 'more loan given') return TransactionType.loanGivenMore;
+      if (l == 'loan recovered') return TransactionType.loanRecovered;
+      if (l == 'loan taken') return TransactionType.loanTaken;
+      if (l == 'more loan taken') return TransactionType.loanTakenMore;
+      if (l == 'loan repaid') return TransactionType.loanRepaid;
+      if (l == 'investment created') return TransactionType.investmentCreated;
+      if (l == 'investment increased') return TransactionType.investmentIncreased;
+      if (l == 'profit added') return TransactionType.investmentProfit;
+      if (l == 'investment withdraw' || l == 'investment withdrawn') return TransactionType.investmentWithdraw;
+      if (l == 'investment expense' || l == 'investment expanse') return TransactionType.investmentExpense;
+      if (l == 'investment adjustment') return TransactionType.investmentAdjustment;
+      if (l == 'savings created') return TransactionType.savingsCreated;
+      if (l == 'savings increased') return TransactionType.savingsIncreased;
+      if (l == 'savings withdraw' || l == 'savings withdrawn' || l == 'savings withdrawal') return TransactionType.savingsWithdrawal;
+      if (l == 'cash withdrawal') return TransactionType.cashWithdrawal;
+    }
+    return TransactionType.expense;
+  }
+
+  static DateTime parseDate(dynamic dateVal) {
+    if (dateVal == null) return DateTime.now();
+    final s = dateVal.toString().trim();
+    if (s.isEmpty) return DateTime.now();
+    try {
+      if (s.contains('-')) {
+        final parts = s.split('-');
+        if (parts.length == 3) {
+          if (parts[0].length <= 2 && (parts[2].length == 2 || parts[2].length == 4)) {
+            final day = int.parse(parts[0]);
+            final month = int.parse(parts[1]);
+            int year = int.parse(parts[2]);
+            if (year < 100) year += 2000;
+            return DateTime(year, month, day);
+          } else if (parts[0].length == 4) {
+            final year = int.parse(parts[0]);
+            final month = int.parse(parts[1]);
+            final day = int.parse(parts[2].split('T').first);
+            return DateTime(year, month, day);
+          }
+        }
+      }
+      return DateTime.parse(s);
+    } catch (_) {
+      return DateTime.now();
+    }
+  }
+
   static List<String> getTabsForTransaction(TransactionType type, String walletName, {String? secondaryTabName}) {
     final List<String> tabs = [];
 
@@ -72,31 +158,17 @@ class SyncService {
       if (sName != null && sName.isNotEmpty && sName != 'N/A' && sName.toLowerCase() != wName.toLowerCase()) {
         tabs.add(walletTabName(sName));
       }
-    } else if (type == TransactionType.loanGiven ||
-        type == TransactionType.loanTaken ||
-        type == TransactionType.loanGivenMore ||
-        type == TransactionType.loanTakenMore ||
-        type == TransactionType.loanRecovered ||
-        type == TransactionType.loanRepaid) {
+    } else if (isLoanTx(type)) {
       tabs.add(loansTabName);
-      if (wName.isNotEmpty && wName != 'N/A' && wName != 'Loans') {
-        tabs.add(walletTabName(wName));
-      }
-    } else if (type == TransactionType.savingsCreated ||
-        type == TransactionType.savingsIncreased ||
-        type == TransactionType.savingsWithdrawal) {
+      final targetWallet = (wName.isNotEmpty && wName != 'N/A' && wName != 'Loans') ? wName : 'Cash';
+      tabs.add(walletTabName(targetWallet));
+    } else if (isSavingsTx(type)) {
       if (sName != null && sName.isNotEmpty) {
         tabs.add(savingsTabName(sName));
       }
-      if (wName.isNotEmpty && wName != 'N/A' && wName != 'Savings') {
-        tabs.add(walletTabName(wName));
-      }
-    } else if (type == TransactionType.investmentCreated ||
-        type == TransactionType.investmentIncreased ||
-        type == TransactionType.investmentProfit ||
-        type == TransactionType.investmentWithdraw ||
-        type == TransactionType.investmentExpense ||
-        type == TransactionType.investmentAdjustment) {
+      final targetWallet = (wName.isNotEmpty && wName != 'N/A' && wName != 'Savings') ? wName : 'Cash';
+      tabs.add(walletTabName(targetWallet));
+    } else if (isInvestmentTx(type)) {
       if (sName != null && sName.isNotEmpty) {
         tabs.add(investmentTabName(sName));
       }
@@ -129,7 +201,10 @@ class SyncService {
     }
 
     try {
-      final targetTabs = getTabsForTransaction(tx.type, walletName, secondaryTabName: secondaryTabName);
+      final effectiveSecondaryTab = (secondaryTabName != null && secondaryTabName.isNotEmpty)
+          ? secondaryTabName
+          : ((isSavingsTx(tx.type) || isInvestmentTx(tx.type)) ? titleCategory : null);
+      final targetTabs = getTabsForTransaction(tx.type, walletName, secondaryTabName: effectiveSecondaryTab);
       bool allSuccess = true;
       for (var tab in targetTabs) {
         final ok = await _syncSingleRow(
@@ -331,13 +406,17 @@ class SyncService {
           final walletName = payload['walletName']?.toString() ?? 'Cash';
           final secTab = payload['secondaryTabName']?.toString();
 
+          final rawType = payload['type']?.toString();
+          final resolvedType = parseType(rawType, typeLabel);
+          final parsedDate = parseDate(payload['date']);
+
           final tx = TransactionModel(
             syncId: id,
             title: titleCat,
             amount: amount,
-            date: DateTime.now(),
+            date: parsedDate,
             note: note,
-            type: TransactionType.expense,
+            type: resolvedType,
             walletId: 1,
           );
 

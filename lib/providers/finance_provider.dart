@@ -2314,7 +2314,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
                 amount: double.tryParse(payload['amount']?.toString() ?? '0') ?? 0.0,
                 date: _parseSheetDateToDateTime(payload['date']?.toString()),
                 note: payload['note']?.toString() ?? '',
-                type: _getTypeFromLabel(payload['transectionType']?.toString() ?? 'Expense'),
+                type: _getTypeFromLabel(payload['type']?.toString() ?? payload['transectionType']?.toString() ?? 'Expense'),
                 walletId: 0,
               ),
               payload['walletName']?.toString() ?? 'Cash',
@@ -2387,6 +2387,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         "note": tx.note,
         "walletName": fromWallet.name,
         "secondaryTabName": toWallet.name,
+        "type": tx.type.name,
       };
     } else {
       String walletName = "N/A";
@@ -2398,21 +2399,23 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
       String titleCategory = "";
       String? secondaryTabName;
 
-      if (tx.categoryId != null && _categories.isNotEmpty) {
+      if (_isInvestmentTx(tx.type)) {
+        titleCategory = _extractName(tx.title);
+        secondaryTabName = titleCategory;
+        if (tx.walletId == 0) walletName = "N/A";
+      } else if (_isSavingsTx(tx.type)) {
+        titleCategory = _extractName(tx.title);
+        secondaryTabName = titleCategory;
+      } else if (_isLoanTx(tx.type)) {
+        titleCategory = _extractName(tx.title);
+        secondaryTabName = "Loans";
+      } else if (tx.categoryId != null && _categories.isNotEmpty) {
         titleCategory = _categories.firstWhere(
           (c) => c.id == tx.categoryId,
           orElse: () => Category(name: 'General', iconCode: 0, type: CategoryType.expense),
         ).name;
       } else {
         titleCategory = _extractName(tx.title);
-        if (_isInvestmentTx(tx.type)) {
-          secondaryTabName = titleCategory;
-          if (tx.walletId == 0) walletName = "N/A";
-        } else if (_isSavingsTx(tx.type)) {
-          secondaryTabName = titleCategory;
-        } else if (_isLoanTx(tx.type)) {
-          secondaryTabName = "Loans";
-        }
       }
 
       return {
@@ -2423,6 +2426,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         "amount": tx.amount,
         "note": tx.note,
         "walletName": walletName,
+        "type": tx.type.name,
         ...? (secondaryTabName != null ? {"secondaryTabName": secondaryTabName} : null),
       };
     }
@@ -2491,12 +2495,11 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   }
 
   TransactionType _getTypeFromLabel(String label) {
-    final String clean = label.trim();
-    switch (clean) {
+    switch (label) {
       case "Diposit":
-      case "deposit":
-      case "Deposit":
       case "diposit":
+      case "Deposit":
+      case "deposit":
       case "Money Added":
       case "Income":
       case "income":
@@ -2512,6 +2515,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
       case "loan given":
         return TransactionType.loanGiven;
       case "More Loan Given":
+      case "more loan given":
         return TransactionType.loanGivenMore;
       case "Loan Recovered":
       case "loan recovered":
@@ -2520,6 +2524,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
       case "loan taken":
         return TransactionType.loanTaken;
       case "More Loan Taken":
+      case "more loan taken":
         return TransactionType.loanTakenMore;
       case "Loan Repaid":
       case "loan repaid":
@@ -2528,27 +2533,43 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
       case "Investment Created":
         return TransactionType.investmentCreated;
       case "Investment Increased":
+      case "investment increased":
         return TransactionType.investmentIncreased;
       case "Profit Added":
+      case "profit added":
         return TransactionType.investmentProfit;
       case "Investment Withdraw":
+      case "investment withdraw":
+      case "Investment Withdrawn":
+      case "investment withdrawn":
         return TransactionType.investmentWithdraw;
       case "investment Expanse":
       case "Investment Expense":
+      case "investment expense":
         return TransactionType.investmentExpense;
       case "Investment Adjustment":
+      case "investment adjustment":
         return TransactionType.investmentAdjustment;
       case "Savings Created":
+      case "savings created":
         return TransactionType.savingsCreated;
       case "Savings Increased":
+      case "savings increased":
         return TransactionType.savingsIncreased;
       case "Savings Withdraw":
+      case "savings withdraw":
+      case "Savings Withdrawn":
+      case "savings withdrawn":
       case "Savings Withdrawal":
+      case "savings withdrawal":
         return TransactionType.savingsWithdrawal;
       case "Cash Withdrawal":
       case "cash withdrawal":
         return TransactionType.cashWithdrawal;
       default:
+        for (var t in TransactionType.values) {
+          if (t.name.toLowerCase() == label.toLowerCase()) return t;
+        }
         return TransactionType.expense;
     }
   }
