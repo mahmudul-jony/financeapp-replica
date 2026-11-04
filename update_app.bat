@@ -1,4 +1,4 @@
-```bat
+
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 title Finance App ADB Updater
@@ -17,6 +17,12 @@ echo.
 :: Check required files
 if not exist "%ADB%" (
     echo ERROR: ADB not found!
+    pause
+    exit /b 1
+)
+
+if not exist "pubspec.yaml" (
+    echo ERROR: pubspec.yaml not found!
     pause
     exit /b 1
 )
@@ -77,34 +83,23 @@ if !COUNT! GTR 1 (
 echo Target phone: !DEVICE!
 echo.
 
-:: Get default version code from pubspec.yaml
-set /a PUBSPEC_BUILD_NUM=1
+:: Increment pubspec.yaml version code
+echo Updating app version...
 
-for /f "tokens=2 delims=+" %%A in ('findstr /r "^version:" pubspec.yaml') do (
-    set /a PUBSPEC_BUILD_NUM=%%A 2>nul
+set "NEW_VERSION="
+
+for /f "delims=" %%A in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='pubspec.yaml'; $c=[System.IO.File]::ReadAllText($p); $r='(?m)^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$'; $m=[regex]::Match($c,$r); if (!$m.Success) { Write-Error 'Invalid version format in pubspec.yaml'; exit 1 }; $n=[int]$m.Groups[2].Value + 1; $v=$m.Groups[1].Value + '+' + $n; $u=[regex]::Replace($c,$r,('version: ' + $v),1); [System.IO.File]::WriteAllText($p,$u,(New-Object System.Text.UTF8Encoding($false))); Write-Output $v"') do (
+    set "NEW_VERSION=%%A"
 )
 
-:: Get installed version code from phone
-set /a PHONE_BUILD_NUM=0
-
-for /f "tokens=1 delims= " %%A in ('"%ADB%" -s !DEVICE! shell dumpsys package %PACKAGE_NAME% 2^>nul ^| findstr /c:"versionCode="' ) do (
-    for /f "tokens=2 delims==" %%B in ("%%A") do (
-        set /a PHONE_BUILD_NUM=%%B 2>nul
-    )
+if not defined NEW_VERSION (
+    echo.
+    echo ERROR: Could not update pubspec.yaml version!
+    pause
+    exit /b 1
 )
 
-:: Calculate next version code
-set /a TARGET_BUILD_NUM=PUBSPEC_BUILD_NUM
-
-if !PHONE_BUILD_NUM! GEQ !TARGET_BUILD_NUM! (
-    set /a TARGET_BUILD_NUM=PHONE_BUILD_NUM+1
-)
-
-echo ========================================
-echo Pubspec Build Number: !PUBSPEC_BUILD_NUM!
-echo Phone Build Number:   !PHONE_BUILD_NUM!
-echo Next Build Number:    !TARGET_BUILD_NUM!
-echo ========================================
+echo New App Version: !NEW_VERSION!
 echo.
 
 :: Generate launcher icons
@@ -121,11 +116,12 @@ if errorlevel 1 (
 :: Build signed release APK
 echo.
 echo Building Finance App with Release Signing...
-call flutter build apk --release --build-number=!TARGET_BUILD_NUM!
+call flutter build apk --release
 
 if errorlevel 1 (
     echo.
     echo ERROR: Build failed!
+    echo Version code has already been incremented.
     pause
     exit /b 1
 )
@@ -142,7 +138,7 @@ echo.
 echo APK build completed successfully.
 echo.
 
-:: Install update without uninstalling existing app
+:: Install update
 echo Installing app on phone...
 
 "%ADB%" -s "!DEVICE!" install -r "%APK_PATH%"
@@ -152,7 +148,6 @@ if errorlevel 1 (
     echo ERROR: Installation failed!
     echo.
     echo Check the installation error above.
-    echo Do NOT uninstall the existing app yet.
     pause
     exit /b 1
 )
@@ -160,7 +155,7 @@ if errorlevel 1 (
 echo.
 echo ========================================
 echo       SUCCESS: App Updated!
+echo       Version: !NEW_VERSION!
 echo ========================================
 echo.
 pause
-```
