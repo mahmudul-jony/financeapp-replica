@@ -93,10 +93,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         AppSpacing.verticalGap,
         _buildToggleItem('Dark Mode', Icons.dark_mode_rounded, _isDarkMode, (v) => setState(() => _isDarkMode = v)),
         AppSpacing.verticalGap,
-        _buildClickableItem('Account Settings', Icons.manage_accounts_rounded),
-        AppSpacing.verticalGap,
-        _buildClickableItem('Notifications', Icons.notifications_active_rounded),
-        AppSpacing.verticalGap,
         _buildSyncButton(),
         AppSpacing.verticalGap,
         _buildResetButton(),
@@ -185,22 +181,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         Expanded(child: Text(label, style: const TextStyle(fontWeight: FontWeight.w500))),
         Switch.adaptive(value: value, activeTrackColor: AppColors.primaryPurple, onChanged: onChanged),
       ],
-    ),
-  );
-
-  Widget _buildClickableItem(String label, IconData icon, {VoidCallback? onTap}) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: AppRadius.borderRadiusMedium),
-      child: Row(
-        children: [
-          Icon(icon, color: AppColors.secondaryText, size: 22),
-          const SizedBox(width: 16),
-          Expanded(child: Text(label, style: const TextStyle(fontWeight: FontWeight.w500))),
-          const Icon(Icons.chevron_right_rounded, color: AppColors.secondaryText),
-        ],
-      ),
     ),
   );
 
