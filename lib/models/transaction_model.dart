@@ -125,7 +125,7 @@ class TransactionModel {
       case TransactionType.savingsWithdrawal:
         return 'Savings Withdrawn';
       case TransactionType.cashWithdrawal:
-        return title.isNotEmpty ? title : 'Withdraw';
+        return 'Withdraw';
     }
   }
 
