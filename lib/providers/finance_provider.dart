@@ -575,7 +575,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
 
     final String sourceName = sourceWallet.name;
     final String cashName = defaultCashWallet.name;
-    final String titleText = "Withdraw from $sourceName - $cashName";
+    final String titleText = "$sourceName - $cashName";
 
     final db = await DatabaseHelper.instance.database;
     final now = DateTime.now();
@@ -2438,9 +2438,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
       return {
         "id": tx.syncId,
         "date": "${tx.date.day.toString().padLeft(2, '0')}-${tx.date.month.toString().padLeft(2, '0')}-${tx.date.year.toString().substring(2)}",
-        "titleCategory": tx.type == TransactionType.cashWithdrawal
-            ? "Withdraw from ${fromWallet.name} - ${toWallet.name}"
-            : "${fromWallet.name} - ${toWallet.name}",
+        "titleCategory": "${fromWallet.name} - ${toWallet.name}",
         "transectionType": _getTransectionTypeLabel(tx.type),
         "amount": tx.amount,
         "note": tx.note,
