@@ -8,8 +8,8 @@
  * 4. Execute as: Me | Who has access: Anyone
  * 5. URL remains the same!
  * 
- * COLUMNS (A-G):
- * A: ID | B: Date | C: Title/Category | D: Transaction Type | E: Amount | F: Note | G: Wallet Name
+ * COLUMNS (A-I):
+ * A: ID | B: Date | C: Title/Category | D: Transection Type | E: Debit | F: Credit | G: Total | H: Note | I: Wallet Name
  * 
  * ID FORMAT: txid_000001, txid_000002, ...
  */
@@ -48,9 +48,9 @@ function doGet(e) {
         for (var j = 1; j < data.length; j++) {
           var row = data[j];
 
-          // Check if this row has any financial data (Date, Title, Type, Amount, Note, Wallet)
+          // Check if this row has any financial data (Date, Title, Type, Debit, Credit, Total, Note, Wallet)
           var hasData = false;
-          for (var col = 1; col < 7; col++) {
+          for (var col = 1; col < Math.min(row.length, 9); col++) {
             if (row[col] !== "" && row[col] !== null && row[col] !== undefined) {
               hasData = true;
               break;
@@ -87,15 +87,41 @@ function doGet(e) {
 
           var titleCategory = row[2] ? row[2].toString().trim() : "";
           var transectionType = row[3] ? row[3].toString().trim() : "";
-          var amount = row[4] !== "" ? row[4] : 0;
-          var note = row[5] ? row[5].toString() : "";
-          var walletName = row[6] ? row[6].toString().trim() : sheetName;
+          var debit = 0;
+          var credit = 0;
+          var total = 0;
+          var amount = 0;
+          var note = "";
+          var walletName = sheetName;
+
+          if (row.length >= 8) {
+            // New 9-column sheet (A: ID, B: Date, C: Title, D: Type, E: Debit, F: Credit, G: Total, H: Note, I: Wallet)
+            debit = (row[4] !== "" && row[4] !== null && row[4] !== undefined) ? (parseFloat(row[4]) || 0) : 0;
+            credit = (row[5] !== "" && row[5] !== null && row[5] !== undefined) ? (parseFloat(row[5]) || 0) : 0;
+            total = (row[6] !== "" && row[6] !== null && row[6] !== undefined) ? (parseFloat(row[6]) || 0) : 0;
+            note = row.length > 7 && row[7] ? row[7].toString() : "";
+            walletName = row.length > 8 && row[8] ? row[8].toString().trim() : sheetName;
+            amount = credit > 0 ? credit : debit;
+          } else {
+            // Backward-compatibility for 7-column sheet
+            amount = (row[4] !== "" && row[4] !== null && row[4] !== undefined) ? (parseFloat(row[4]) || 0) : 0;
+            note = row.length > 5 && row[5] ? row[5].toString() : "";
+            walletName = row.length > 6 && row[6] ? row[6].toString().trim() : sheetName;
+            if (isDebitTransaction(transectionType)) {
+              debit = amount;
+            } else {
+              credit = amount;
+            }
+          }
 
           var record = {
             "id": id,
             "date": dateStr,
             "titleCategory": titleCategory,
             "transectionType": transectionType,
+            "debit": debit,
+            "credit": credit,
+            "total": total,
             "amount": amount,
             "note": note,
             "walletName": walletName,
@@ -112,11 +138,11 @@ function doGet(e) {
               warnings.push("Incompatible amount for ID '" + id + "' between tab '" + existing.sheetName + "' (" + existing.amount + ") and tab '" + sheetName + "' (" + amount + ")");
             }
 
-            // Prefer the "To " entry for transfers because it preserves source wallet
-            if (titleCategory.indexOf("To ") === 0) {
+            // Prefer the "To " or "Transferred to" entry for transfers because it preserves destination info
+            if (titleCategory.indexOf("To ") === 0 || transectionType.toLowerCase() === "transferred to" || transectionType.toLowerCase() === "withdraw to (cash)") {
               idMap[id] = record;
-            } else if (existing.titleCategory.indexOf("To ") === 0) {
-              // Keep existing "To " entry
+            } else if (existing.titleCategory.indexOf("To ") === 0 || existing.transectionType.toLowerCase() === "transferred to" || existing.transectionType.toLowerCase() === "withdraw to (cash)") {
+              // Keep existing destination entry
             } else if (sheetName !== "Loans" && existing.sheetName === "Loans") {
               // Prefer wallet tab over projection tab "Loans"
               idMap[id] = record;
@@ -234,7 +260,7 @@ function doPost(e) {
       return jsonResponse({ status: "success", action: "update_category_name" });
     }
 
-    // 5. Update Wallet Name across ALL sheets (Column G)
+    // 5. Update Wallet Name across ALL sheets (Column I)
     if (action === "update_wallet_name") {
       updateWalletNameInternal(ss, contents.oldName, contents.newName);
       return jsonResponse({ status: "success", action: "update_wallet_name" });
@@ -323,6 +349,17 @@ function getOrCreateSheet(ss, sheetName, defaultPrefix) {
   return createSheetWithHeaders(ss, targetName);
 }
 
+function isDebitTransaction(typeLabel) {
+  var l = (typeLabel || "").toLowerCase().trim();
+  if (l === "expense" || l === "expanse") return true;
+  if (l === "transferred from" || l === "transfer" || l === "transferred") return true;
+  if (l === "withdraw from" || l === "withdraw" || l === "cash withdrawal" || l === "cash withdraw") return true;
+  if (l === "loan given" || l === "more loan given" || l === "loan repaid") return true;
+  if (l === "investment created" || l === "investmentcreated" || l === "investment increased" || l === "investment expense" || l === "investment expanse" || l === "investment adjustment") return true;
+  if (l === "savings created" || l === "savings increased") return true;
+  return false;
+}
+
 function isLoanType(type, label) {
   var t = (type || "").toLowerCase();
   var l = (label || "").toLowerCase();
@@ -350,17 +387,78 @@ function upsertTransaction(ss, payload) {
   var isLoan = isLoanType(rawType, typeLabel);
   var isSaving = isSavingsType(rawType, typeLabel);
   var isInvest = isInvestmentType(rawType, typeLabel);
+  var isTransfer = (rawType === "transfer" || typeLabel.toLowerCase().indexOf("transfer") !== -1);
+  var isCashWithdrawal = (rawType === "cashWithdrawal" || typeLabel.toLowerCase().indexOf("withdraw") !== -1);
+
+  var amount = payload.amount !== undefined ? parseFloat(payload.amount) : 0;
+  var debit = payload.debit !== undefined ? payload.debit : (isDebitTransaction(typeLabel) ? amount : "");
+  var credit = payload.credit !== undefined ? payload.credit : (!isDebitTransaction(typeLabel) ? amount : "");
+  var total = payload.total !== undefined ? payload.total : "";
+  var secondaryTotal = payload.secondaryTotal !== undefined ? payload.secondaryTotal : "";
+
+  if (isTransfer || isCashWithdrawal) {
+    // 1. Primary Wallet Tab: Outflow -> Debit
+    var primaryTypeLabel = isCashWithdrawal ? "Withdraw from" : "Transferred from";
+    var primaryPayload = {
+      id: payload.id,
+      date: payload.date,
+      titleCategory: payload.titleCategory,
+      transectionType: primaryTypeLabel,
+      debit: amount,
+      credit: "",
+      total: total,
+      note: payload.note,
+      walletName: walletName
+    };
+    if (walletName && walletName !== "N/A" && walletName !== "None") {
+      var walletSheet = getOrCreateSheet(ss, walletName, "Wallet-");
+      upsertTransactionRowInSheet(walletSheet, primaryPayload);
+    }
+
+    // 2. Secondary Wallet Tab: Inflow -> Credit
+    if (secondaryTabName && secondaryTabName !== walletName && secondaryTabName !== "N/A") {
+      var secondaryTypeLabel = isCashWithdrawal ? "Withdraw to (Cash)" : "Transferred to";
+      var secondaryPayload = {
+        id: payload.id,
+        date: payload.date,
+        titleCategory: payload.titleCategory,
+        transectionType: secondaryTypeLabel,
+        debit: "",
+        credit: amount,
+        total: secondaryTotal !== "" ? secondaryTotal : total,
+        note: payload.note,
+        walletName: secondaryTabName
+      };
+      var targetSheet = getOrCreateSheet(ss, secondaryTabName, "Wallet-");
+      upsertTransactionRowInSheet(targetSheet, secondaryPayload);
+    }
+    return;
+  }
+
+  // Non-transfer standard transaction payload
+  var isDebit = isDebitTransaction(typeLabel);
+  var standardPayload = {
+    id: payload.id,
+    date: payload.date,
+    titleCategory: payload.titleCategory,
+    transectionType: typeLabel,
+    debit: isDebit ? amount : "",
+    credit: !isDebit ? amount : "",
+    total: total,
+    note: payload.note,
+    walletName: walletName
+  };
 
   // 1. Write / Update Primary Wallet Tab
   if (walletName && walletName !== "N/A" && walletName !== "None") {
     var walletSheet = getOrCreateSheet(ss, walletName, "Wallet-");
-    upsertTransactionRowInSheet(walletSheet, payload);
+    upsertTransactionRowInSheet(walletSheet, standardPayload);
   }
 
   // 2. Write / Update Loans Tab (for all loan transactions)
   if (isLoan) {
     var loansSheet = getOrCreateSheet(ss, "Loans", "");
-    upsertTransactionRowInSheet(loansSheet, payload);
+    upsertTransactionRowInSheet(loansSheet, standardPayload);
   }
 
   // 3. Write / Update Savings Tab
@@ -368,7 +466,7 @@ function upsertTransaction(ss, payload) {
     var savingName = secondaryTabName || payload.titleCategory || "";
     if (savingName && savingName !== "N/A") {
       var savingSheet = getOrCreateSheet(ss, savingName, "Saving-");
-      upsertTransactionRowInSheet(savingSheet, payload);
+      upsertTransactionRowInSheet(savingSheet, standardPayload);
     }
   }
 
@@ -377,14 +475,8 @@ function upsertTransaction(ss, payload) {
     var investName = secondaryTabName || payload.titleCategory || "";
     if (investName && investName !== "N/A") {
       var investSheet = getOrCreateSheet(ss, investName, "Invest-");
-      upsertTransactionRowInSheet(investSheet, payload);
+      upsertTransactionRowInSheet(investSheet, standardPayload);
     }
-  }
-
-  // 5. Transfer Secondary Tab
-  if (secondaryTabName && !isLoan && !isSaving && !isInvest && secondaryTabName !== walletName && secondaryTabName !== "N/A") {
-    var targetSheet = getOrCreateSheet(ss, secondaryTabName, "Wallet-");
-    upsertTransactionRowInSheet(targetSheet, payload);
   }
 }
 
@@ -398,7 +490,9 @@ function upsertTransactionRowInSheet(sheet, payload) {
   var date = payload.date || "";
   var titleCategory = payload.titleCategory || "";
   var transectionType = payload.transectionType || "";
-  var amount = payload.amount !== undefined ? payload.amount : 0;
+  var debit = payload.debit !== undefined ? payload.debit : "";
+  var credit = payload.credit !== undefined ? payload.credit : "";
+  var total = payload.total !== undefined ? payload.total : "";
   var note = payload.note || "";
   var walletName = payload.walletName || sheet.getName();
 
@@ -414,10 +508,10 @@ function upsertTransactionRowInSheet(sheet, payload) {
     }
   }
 
-  var rowValues = [id, date, titleCategory, transectionType, amount, note, walletName];
+  var rowValues = [id, date, titleCategory, transectionType, debit, credit, total, note, walletName];
 
   if (foundRow > 0) {
-    sheet.getRange(foundRow, 1, 1, 7).setValues([rowValues]);
+    sheet.getRange(foundRow, 1, 1, 9).setValues([rowValues]);
   } else {
     sheet.appendRow(rowValues);
   }
@@ -480,8 +574,9 @@ function updateWalletNameInternal(ss, oldName, newName) {
       var s = sheets[w];
       var d = s.getDataRange().getValues();
       for (var rowIdx = 1; rowIdx < d.length; rowIdx++) {
-        if (d[rowIdx][6] && d[rowIdx][6].toString().trim().toLowerCase() === oldNorm) {
-          s.getRange(rowIdx + 1, 7).setValue(newClean);
+        var walletCol = d[rowIdx].length > 8 ? 8 : 6;
+        if (d[rowIdx][walletCol] && d[rowIdx][walletCol].toString().trim().toLowerCase() === oldNorm) {
+          s.getRange(rowIdx + 1, walletCol + 1).setValue(newClean);
         }
       }
     }
@@ -495,8 +590,8 @@ function createSheetWithHeaders(ss, name) {
 }
 
 function addHeaders(sheet) {
-  sheet.appendRow(["ID", "Date", "Title / Category", "Transaction Type", "Amount", "Note", "Wallet Name"]);
-  sheet.getRange("A1:G1").setFontWeight("bold").setBackground("#f3f3f3");
+  sheet.appendRow(["ID", "Date", "Title / Category", "Transection Type", "Debit", "Credit", "Total", "Note", "Wallet Name"]);
+  sheet.getRange("A1:I1").setFontWeight("bold").setBackground("#f3f3f3");
   sheet.setFrozenRows(1);
 }
 

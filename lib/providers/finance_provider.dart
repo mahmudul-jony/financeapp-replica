@@ -2001,7 +2001,12 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
           continue;
         }
 
-        final rawAmount = double.tryParse(row['amount']?.toString() ?? '0') ?? 0.0;
+        final rawDebit = double.tryParse(row['debit']?.toString() ?? '0') ?? 0.0;
+        final rawCredit = double.tryParse(row['credit']?.toString() ?? '0') ?? 0.0;
+        final rawTotal = double.tryParse(row['total']?.toString() ?? '0') ?? 0.0;
+        final rawAmount = (rawCredit > 0 || rawDebit > 0)
+            ? (rawCredit > 0 ? rawCredit : rawDebit)
+            : (double.tryParse(row['amount']?.toString() ?? '0') ?? 0.0);
         final rawDate = _parseSheetDate(row['date']?.toString());
         final rawNote = row['note']?.toString() ?? '';
         final rawTitleCategory = row['titleCategory']?.toString() ?? 'General';
@@ -2120,12 +2125,18 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
           }
         }
 
+        final isDebit = TransactionModel.isDebitType(type);
+        final effectiveDebit = rawDebit > 0 ? rawDebit : (isDebit ? rawAmount : 0.0);
+        final effectiveCredit = rawCredit > 0 ? rawCredit : (!isDebit ? rawAmount : 0.0);
+
         if (localTx == null) {
           // 1. Transaction added directly in Google Sheets while app was offline
           await txn.insert('transactions', {
             'sync_id': remoteId,
             'title': rawTitleCategory,
-            'amount': rawAmount,
+            'debit': effectiveDebit,
+            'credit': effectiveCredit,
+            'total': rawTotal,
             'date': rawDate,
             'note': rawNote,
             'type': type.name,
@@ -2145,7 +2156,9 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
               'transactions',
               {
                 'title': rawTitleCategory,
-                'amount': rawAmount,
+                'debit': effectiveDebit,
+                'credit': effectiveCredit,
+                'total': rawTotal,
                 'date': rawDate,
                 'note': rawNote,
                 'type': type.name,
@@ -2263,8 +2276,16 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
     }
 
     // 5. Amount comparison (tolerance 0.01)
-    final localAmount = (localTx['amount'] as num).toDouble();
-    final remoteAmount = double.tryParse(remoteRow['amount']?.toString() ?? '0') ?? 0.0;
+    final localCredit = (localTx['credit'] as num?)?.toDouble() ?? 0.0;
+    final localDebit = (localTx['debit'] as num?)?.toDouble() ?? 0.0;
+    final localAmount = (localTx['amount'] as num?)?.toDouble() ?? (localCredit > 0 ? localCredit : localDebit);
+
+    final remoteCredit = double.tryParse(remoteRow['credit']?.toString() ?? '0') ?? 0.0;
+    final remoteDebit = double.tryParse(remoteRow['debit']?.toString() ?? '0') ?? 0.0;
+    final remoteAmount = (remoteRow['amount'] != null && remoteRow['amount'].toString().isNotEmpty)
+        ? (double.tryParse(remoteRow['amount'].toString()) ?? 0.0)
+        : (remoteCredit > 0 ? remoteCredit : remoteDebit);
+
     if ((localAmount - remoteAmount).abs() > 0.01) {
       diffs.add('Amount (Local: $localAmount, Sheet: $remoteAmount)');
     }
@@ -2410,16 +2431,33 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
   }
 
   Future<TransactionModel> _insertTransactionInTx(Transaction txn, TransactionModel tx) async {
-    final int id = await txn.insert('transactions', tx.toMap());
+    TransactionModel txWithTotal = tx;
+    if (tx.walletId != 0) {
+      final walletRows = await txn.query('wallets', columns: ['balance'], where: 'id = ?', whereArgs: [tx.walletId]);
+      if (walletRows.isNotEmpty) {
+        final currentBalance = (walletRows.first['balance'] as num).toDouble();
+        txWithTotal = tx.copyWith(total: currentBalance);
+      }
+    }
+
+    double? secondaryTotal;
+    if (tx.toWalletId != null && tx.toWalletId != 0) {
+      final toWalletRows = await txn.query('wallets', columns: ['balance'], where: 'id = ?', whereArgs: [tx.toWalletId]);
+      if (toWalletRows.isNotEmpty) {
+        secondaryTotal = (toWalletRows.first['balance'] as num).toDouble();
+      }
+    }
+
+    final int id = await txn.insert('transactions', txWithTotal.toMap());
     final String formattedSyncId = TransactionModel.formatSyncId(id);
     await txn.update('transactions', {'sync_id': formattedSyncId}, where: 'id = ?', whereArgs: [id]);
-    final insertedTx = tx.copyWith(id: id, syncId: formattedSyncId);
-    await _enqueueTxSyncInTx(txn, insertedTx, 'create');
+    final insertedTx = txWithTotal.copyWith(id: id, syncId: formattedSyncId);
+    await _enqueueTxSyncInTx(txn, insertedTx, 'create', secondaryTotal: secondaryTotal);
     return insertedTx;
   }
 
-  Future<void> _enqueueTxSyncInTx(Transaction txn, TransactionModel tx, String action) async {
-    final payload = _buildTxSyncPayload(tx);
+  Future<void> _enqueueTxSyncInTx(Transaction txn, TransactionModel tx, String action, {double? secondaryTotal}) async {
+    final payload = _buildTxSyncPayload(tx, secondaryTotal: secondaryTotal);
     await txn.insert('sync_queue', {
       'entity_type': 'transaction',
       'entity_id': tx.syncId,
@@ -2431,7 +2469,11 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
     });
   }
 
-  Map<String, dynamic> _buildTxSyncPayload(TransactionModel tx) {
+  Map<String, dynamic> _buildTxSyncPayload(TransactionModel tx, {double? secondaryTotal}) {
+    final isDebit = TransactionModel.isDebitType(tx.type);
+    final debitVal = isDebit ? tx.amount : 0.0;
+    final creditVal = !isDebit ? tx.amount : 0.0;
+
     if ((tx.type == TransactionType.transfer || tx.type == TransactionType.cashWithdrawal) && tx.toWalletId != null) {
       final fromWallet = _wallets.firstWhere((w) => w.id == tx.walletId, orElse: () => _wallets.first);
       final toWallet = _wallets.firstWhere((w) => w.id == tx.toWalletId, orElse: () => _wallets.first);
@@ -2441,6 +2483,10 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         "titleCategory": "${fromWallet.name} - ${toWallet.name}",
         "transectionType": _getTransectionTypeLabel(tx.type),
         "amount": tx.amount,
+        "debit": debitVal,
+        "credit": creditVal,
+        "total": tx.total,
+        ...? (secondaryTotal != null ? {"secondaryTotal": secondaryTotal} : null),
         "note": tx.note,
         "walletName": fromWallet.name,
         "secondaryTabName": toWallet.name,
@@ -2481,6 +2527,9 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         "titleCategory": titleCategory,
         "transectionType": _getTransectionTypeLabel(tx.type),
         "amount": tx.amount,
+        "debit": debitVal,
+        "credit": creditVal,
+        "total": tx.total,
         "note": tx.note,
         "walletName": walletName,
         "type": tx.type.name,
@@ -2501,7 +2550,9 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
       for (var txMap in txRows) {
         int? walletId = txMap['walletId'];
         int? toWalletId = txMap['toWalletId'];
-        double amount = (txMap['amount'] as num).toDouble();
+        final rawCredit = (txMap['credit'] as num?)?.toDouble() ?? 0.0;
+        final rawDebit = (txMap['debit'] as num?)?.toDouble() ?? 0.0;
+        double amount = (txMap['amount'] as num?)?.toDouble() ?? (rawCredit > 0 ? rawCredit : rawDebit);
         TransactionType type = TransactionType.values.byName(txMap['type']);
 
         if (walletId == wId) {
@@ -2548,6 +2599,24 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
         'UPDATE wallets SET balance = ?, frozen_amount = ? WHERE id = ?',
         [calculatedBalance, calculatedFrozen < 0 ? 0.0 : calculatedFrozen, wId],
       );
+    }
+
+    for (var w in walletRows) {
+      int wId = w['id'];
+      final walletTxs = await txn.query(
+        'transactions',
+        where: 'walletId = ?',
+        whereArgs: [wId],
+        orderBy: 'date ASC, id ASC',
+      );
+      double running = 0.0;
+      for (var tx in walletTxs) {
+        final tId = tx['id'] as int;
+        final d = (tx['debit'] as num?)?.toDouble() ?? 0.0;
+        final c = (tx['credit'] as num?)?.toDouble() ?? 0.0;
+        running = running + c - d;
+        await txn.update('transactions', {'total': running}, where: 'id = ?', whereArgs: [tId]);
+      }
     }
   }
 
@@ -2620,6 +2689,18 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
       case "Savings Withdrawal":
       case "savings withdrawal":
         return TransactionType.savingsWithdrawal;
+      case "Withdraw from":
+      case "withdraw from":
+      case "Withdraw to (Cash)":
+      case "withdraw to (cash)":
+      case "Withdraw to":
+      case "withdraw to":
+        return TransactionType.cashWithdrawal;
+      case "Transferred from":
+      case "transferred from":
+      case "Transferred to":
+      case "transferred to":
+        return TransactionType.transfer;
       case "Cash Withdrawal":
       case "cash withdrawal":
       case "Cash Withdraw":
@@ -2704,7 +2785,7 @@ class FinanceProvider with ChangeNotifier, WidgetsBindingObserver {
       case TransactionType.loanTaken: return "Loan Taken";
       case TransactionType.loanTakenMore: return "More Loan Taken";
       case TransactionType.loanRepaid: return "Loan Repaid";
-      case TransactionType.investmentCreated: return "investmentCreated";
+      case TransactionType.investmentCreated: return "Investment Created";
       case TransactionType.investmentIncreased: return "Investment Increased";
       case TransactionType.investmentProfit: return "Profit Added";
       case TransactionType.investmentWithdraw: return "Investment Withdraw";

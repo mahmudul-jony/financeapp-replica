@@ -42,7 +42,9 @@ class DriveResourceService {
     "Date",
     "Title / Category",
     "Transection Type",
-    "Amount",
+    "Debit",
+    "Credit",
+    "Total",
     "Note",
     "Wallet Name",
   ];
@@ -394,7 +396,7 @@ class DriveResourceService {
           }
           if (!hasHeader) {
             headerDataUpdates.add({
-              "range": "'$tab'!A1:G1",
+              "range": "'$tab'!A1:I1",
               "values": [defaultHeaders],
             });
           }

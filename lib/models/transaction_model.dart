@@ -24,7 +24,9 @@ class TransactionModel {
   final int? id;
   final String syncId;
   final String title;
-  final double amount;
+  final double debit;
+  final double credit;
+  final double total;
   final DateTime date;
   final String note;
   final TransactionType type;
@@ -38,7 +40,10 @@ class TransactionModel {
     this.id,
     String? syncId,
     required this.title,
-    required this.amount,
+    double? amount,
+    double? debit,
+    double? credit,
+    this.total = 0.0,
     required this.date,
     required this.note,
     required this.type,
@@ -47,9 +52,43 @@ class TransactionModel {
     this.categoryId,
     this.syncStatus = 'synced',
     this.updatedAt,
-  }) : syncId = (syncId != null && syncId.trim().isNotEmpty)
+  })  : debit = debit ?? (amount != null && isDebitType(type) ? amount : 0.0),
+        credit = credit ?? (amount != null && !isDebitType(type) ? amount : 0.0),
+        syncId = (syncId != null && syncId.trim().isNotEmpty)
             ? syncId.trim()
             : (id != null ? formatSyncId(id) : '');
+
+  static bool isDebitType(TransactionType type) {
+    switch (type) {
+      case TransactionType.expense:
+      case TransactionType.transfer:
+      case TransactionType.cashWithdrawal:
+      case TransactionType.loanGiven:
+      case TransactionType.loanGivenMore:
+      case TransactionType.loanRepaid:
+      case TransactionType.investmentCreated:
+      case TransactionType.investmentIncreased:
+      case TransactionType.investmentExpense:
+      case TransactionType.investmentAdjustment:
+      case TransactionType.savingsCreated:
+      case TransactionType.savingsIncreased:
+        return true;
+      case TransactionType.income:
+      case TransactionType.loanRecovered:
+      case TransactionType.loanTaken:
+      case TransactionType.loanTakenMore:
+      case TransactionType.investmentProfit:
+      case TransactionType.investmentWithdraw:
+      case TransactionType.savingsWithdrawal:
+        return false;
+    }
+  }
+
+  static bool isCreditType(TransactionType type) => !isDebitType(type);
+
+  bool get isDebit => isDebitType(type);
+  bool get isCredit => !isDebit;
+  double get amount => credit > 0 ? credit : debit;
 
   static String formatSyncId(int id) {
     return 'txid_${id.toString().padLeft(6, '0')}';
@@ -60,6 +99,9 @@ class TransactionModel {
     String? syncId,
     String? title,
     double? amount,
+    double? debit,
+    double? credit,
+    double? total,
     DateTime? date,
     String? note,
     TransactionType? type,
@@ -70,14 +112,28 @@ class TransactionModel {
     DateTime? updatedAt,
   }) {
     final effectiveId = id ?? this.id;
+    final effectiveType = type ?? this.type;
+    double effectiveDebit = debit ?? this.debit;
+    double effectiveCredit = credit ?? this.credit;
+    if (amount != null && debit == null && credit == null) {
+      if (isDebitType(effectiveType)) {
+        effectiveDebit = amount;
+        effectiveCredit = 0.0;
+      } else {
+        effectiveCredit = amount;
+        effectiveDebit = 0.0;
+      }
+    }
     return TransactionModel(
       id: effectiveId,
       syncId: syncId ?? (this.syncId.isNotEmpty ? this.syncId : (effectiveId != null ? formatSyncId(effectiveId) : '')),
       title: title ?? this.title,
-      amount: amount ?? this.amount,
+      debit: effectiveDebit,
+      credit: effectiveCredit,
+      total: total ?? this.total,
       date: date ?? this.date,
       note: note ?? this.note,
-      type: type ?? this.type,
+      type: effectiveType,
       walletId: walletId ?? this.walletId,
       toWalletId: toWalletId ?? this.toWalletId,
       categoryId: categoryId ?? this.categoryId,
@@ -144,7 +200,9 @@ class TransactionModel {
       'id': id,
       'sync_id': syncId.isNotEmpty ? syncId : (id != null ? formatSyncId(id!) : null),
       'title': title,
-      'amount': amount,
+      'debit': debit,
+      'credit': credit,
+      'total': total,
       'date': "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}",
       'note': note,
       'type': type.name,
@@ -163,14 +221,31 @@ class TransactionModel {
       sId = formatSyncId(id);
     }
 
+    final rawType = TransactionType.values.byName(map['type']);
+    double debit = (map['debit'] as num?)?.toDouble() ?? 0.0;
+    double credit = (map['credit'] as num?)?.toDouble() ?? 0.0;
+    final double total = (map['total'] as num?)?.toDouble() ?? 0.0;
+
+    // Backward compatibility if loading old records with amount
+    if (debit == 0.0 && credit == 0.0 && map['amount'] != null) {
+      final amt = (map['amount'] as num).toDouble();
+      if (isDebitType(rawType)) {
+        debit = amt;
+      } else {
+        credit = amt;
+      }
+    }
+
     return TransactionModel(
       id: id,
       syncId: sId,
       title: map['title'] ?? '',
-      amount: (map['amount'] as num).toDouble(),
+      debit: debit,
+      credit: credit,
+      total: total,
       date: DateTime.parse(map['date']),
       note: map['note'] ?? '',
-      type: TransactionType.values.byName(map['type']),
+      type: rawType,
       walletId: map['walletId'],
       toWalletId: map['toWalletId'],
       categoryId: map['categoryId'],

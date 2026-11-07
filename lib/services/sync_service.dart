@@ -96,14 +96,14 @@ class SyncService {
       final l = typeLabel.trim().toLowerCase();
       if (l == 'diposit' || l == 'deposit' || l == 'money added' || l == 'income') return TransactionType.income;
       if (l == 'expense' || l == 'expanse') return TransactionType.expense;
-      if (l == 'transferred' || l == 'transfer') return TransactionType.transfer;
+      if (l == 'transferred' || l == 'transfer' || l == 'transferred from' || l == 'transferred to') return TransactionType.transfer;
       if (l == 'loan given') return TransactionType.loanGiven;
       if (l == 'more loan given') return TransactionType.loanGivenMore;
       if (l == 'loan recovered') return TransactionType.loanRecovered;
       if (l == 'loan taken') return TransactionType.loanTaken;
       if (l == 'more loan taken') return TransactionType.loanTakenMore;
       if (l == 'loan repaid') return TransactionType.loanRepaid;
-      if (l == 'investment created') return TransactionType.investmentCreated;
+      if (l == 'investment created' || l == 'investmentcreated') return TransactionType.investmentCreated;
       if (l == 'investment increased') return TransactionType.investmentIncreased;
       if (l == 'profit added') return TransactionType.investmentProfit;
       if (l == 'investment withdraw' || l == 'investment withdrawn') return TransactionType.investmentWithdraw;
@@ -112,7 +112,7 @@ class SyncService {
       if (l == 'savings created') return TransactionType.savingsCreated;
       if (l == 'savings increased') return TransactionType.savingsIncreased;
       if (l == 'savings withdraw' || l == 'savings withdrawn' || l == 'savings withdrawal') return TransactionType.savingsWithdrawal;
-      if (l == 'withdraw' || l == 'cash withdrawal' || l == 'cash withdraw' || l == 'cashwithdrawal') return TransactionType.cashWithdrawal;
+      if (l == 'withdraw' || l == 'cash withdrawal' || l == 'cash withdraw' || l == 'cashwithdrawal' || l == 'withdraw from' || l == 'withdraw to (cash)' || l == 'withdraw to') return TransactionType.cashWithdrawal;
     }
     return TransactionType.expense;
   }
@@ -191,6 +191,7 @@ class SyncService {
     String typeLabel, {
     String action = 'create',
     String? secondaryTabName,
+    double? secondaryTotal,
   }) async {
     final headers = await AuthService().getAuthHeaders();
     final spreadsheetId = await DriveResourceService.instance.getSpreadsheetId();
@@ -216,6 +217,8 @@ class SyncService {
           typeLabel: typeLabel,
           walletName: walletName,
           action: action,
+          secondaryTabName: effectiveSecondaryTab,
+          secondaryTotal: secondaryTotal,
         );
         if (!ok) allSuccess = false;
       }
@@ -235,31 +238,84 @@ class SyncService {
     required String typeLabel,
     required String walletName,
     required String action,
+    String? secondaryTabName,
+    double? secondaryTotal,
   }) async {
+    if (action == 'delete') {
+      return await deleteTransaction(tx.syncId);
+    }
+
     // 1. Ensure tab exists
     await createTab(tabName);
+
+    // Determine tab-specific typeLabel, debit, credit, total, walletName
+    String effectiveTypeLabel = typeLabel;
+    dynamic debitVal = "";
+    dynamic creditVal = "";
+    dynamic totalVal = tx.total;
+    String effectiveWalletName = walletName;
+
+    final isTransferOrCashWithdraw = (tx.type == TransactionType.transfer || tx.type == TransactionType.cashWithdrawal);
+
+    if (isTransferOrCashWithdraw) {
+      final isSecondaryTab = secondaryTabName != null &&
+          (tabName == walletTabName(secondaryTabName) || stripTabPrefix(tabName).toLowerCase() == secondaryTabName.toLowerCase());
+
+      if (isSecondaryTab) {
+        // Destination tab -> Credit!
+        if (tx.type == TransactionType.cashWithdrawal) {
+          effectiveTypeLabel = "Withdraw to (Cash)";
+        } else {
+          effectiveTypeLabel = "Transferred to";
+        }
+        debitVal = "";
+        creditVal = tx.amount;
+        totalVal = secondaryTotal ?? tx.total;
+        effectiveWalletName = secondaryTabName;
+      } else {
+        // Source tab -> Debit!
+        if (tx.type == TransactionType.cashWithdrawal) {
+          effectiveTypeLabel = "Withdraw from";
+        } else {
+          effectiveTypeLabel = "Transferred from";
+        }
+        debitVal = tx.amount;
+        creditVal = "";
+        totalVal = tx.total;
+        effectiveWalletName = walletName;
+      }
+    } else {
+      // Non-transfer: check isDebitType
+      final isDebit = TransactionModel.isDebitType(tx.type);
+      if (isDebit) {
+        debitVal = tx.amount;
+        creditVal = "";
+      } else {
+        debitVal = "";
+        creditVal = tx.amount;
+      }
+      totalVal = tx.total;
+    }
 
     final dateStr = "${tx.date.day.toString().padLeft(2, '0')}-${tx.date.month.toString().padLeft(2, '0')}-${tx.date.year.toString().substring(2)}";
     final rowValues = [
       tx.syncId,
       dateStr,
       titleCategory,
-      typeLabel,
-      tx.amount,
+      effectiveTypeLabel,
+      debitVal,
+      creditVal,
+      totalVal,
       tx.note,
-      walletName,
+      effectiveWalletName,
     ];
-
-    if (action == 'delete') {
-      return await deleteTransaction(tx.syncId);
-    }
 
     // 2. Search for existing row with syncId in Column A of tab
     final existingRowIndex = await _findRowIndexById(headers, spreadsheetId, tabName, tx.syncId);
 
     if (existingRowIndex != null) {
       // Update existing row
-      final range = Uri.encodeComponent("'$tabName'!A$existingRowIndex:G$existingRowIndex");
+      final range = Uri.encodeComponent("'$tabName'!A$existingRowIndex:I$existingRowIndex");
       final updateUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId/values/$range?valueInputOption=USER_ENTERED");
       final res = await http.put(
         updateUri,
@@ -272,7 +328,7 @@ class SyncService {
       return res.statusCode == 200;
     } else {
       // Append new row
-      final range = Uri.encodeComponent("'$tabName'!A:G");
+      final range = Uri.encodeComponent("'$tabName'!A:I");
       final appendUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId/values/$range:append?valueInputOption=USER_ENTERED");
       final res = await http.post(
         appendUri,
@@ -401,7 +457,11 @@ class SyncService {
         } else {
           final titleCat = payload['titleCategory']?.toString() ?? 'General';
           final typeLabel = payload['transectionType']?.toString() ?? 'Expense';
-          final amount = double.tryParse(payload['amount']?.toString() ?? '0') ?? 0.0;
+          final debit = double.tryParse(payload['debit']?.toString() ?? '0') ?? 0.0;
+          final credit = double.tryParse(payload['credit']?.toString() ?? '0') ?? 0.0;
+          final total = double.tryParse(payload['total']?.toString() ?? '0') ?? 0.0;
+          final secondaryTotal = double.tryParse(payload['secondaryTotal']?.toString() ?? '');
+          final amount = credit > 0 ? credit : (debit > 0 ? debit : (double.tryParse(payload['amount']?.toString() ?? '0') ?? 0.0));
           final note = payload['note']?.toString() ?? '';
           final walletName = payload['walletName']?.toString() ?? 'Cash';
           final secTab = payload['secondaryTabName']?.toString();
@@ -414,6 +474,9 @@ class SyncService {
             syncId: id,
             title: titleCat,
             amount: amount,
+            debit: debit > 0 ? debit : (TransactionModel.isDebitType(resolvedType) ? amount : 0.0),
+            credit: credit > 0 ? credit : (!TransactionModel.isDebitType(resolvedType) ? amount : 0.0),
+            total: total,
             date: parsedDate,
             note: note,
             type: resolvedType,
@@ -427,6 +490,7 @@ class SyncService {
             typeLabel,
             action: action,
             secondaryTabName: secTab,
+            secondaryTotal: secondaryTotal,
           );
 
           if (success) {
@@ -483,8 +547,8 @@ class SyncService {
         return const SheetFetchResult(isSuccess: true, data: []);
       }
 
-      // 2. Batch get data rows A2:G for all tabs
-      final rangesQuery = tabTitles.map((t) => "ranges=${Uri.encodeComponent("'$t'!A2:G")}").join('&');
+      // 2. Batch get data rows A2:I for all tabs
+      final rangesQuery = tabTitles.map((t) => "ranges=${Uri.encodeComponent("'$t'!A2:I")}").join('&');
       final batchGetUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId/values:batchGet?$rangesQuery");
       final batchGetRes = await http.get(batchGetUri, headers: headers).timeout(const Duration(seconds: 20));
 
@@ -525,9 +589,35 @@ class SyncService {
           final date = row.length > 1 ? row[1]?.toString() ?? '' : '';
           final titleCat = row.length > 2 ? row[2]?.toString() ?? 'General' : 'General';
           final typeLabel = row.length > 3 ? row[3]?.toString() ?? 'Expense' : 'Expense';
-          final amount = row.length > 4 ? (double.tryParse(row[4]?.toString() ?? '0') ?? 0.0) : 0.0;
-          final note = row.length > 5 ? row[5]?.toString() ?? '' : '';
-          final rawWallet = row.length > 6 ? (row[6]?.toString() ?? tabName) : tabName;
+
+          double debit = 0.0;
+          double credit = 0.0;
+          double total = 0.0;
+          double amount = 0.0;
+          String note = '';
+          String rawWallet = tabName;
+
+          if (row.length >= 8) {
+            // New 9-column sheet (A: ID, B: Date, C: Title, D: Type, E: Debit, F: Credit, G: Total, H: Note, I: Wallet)
+            debit = double.tryParse(row[4]?.toString() ?? '0') ?? 0.0;
+            credit = double.tryParse(row[5]?.toString() ?? '0') ?? 0.0;
+            total = double.tryParse(row[6]?.toString() ?? '0') ?? 0.0;
+            note = row.length > 7 ? row[7]?.toString() ?? '' : '';
+            rawWallet = row.length > 8 ? (row[8]?.toString() ?? tabName) : tabName;
+            amount = credit > 0 ? credit : debit;
+          } else {
+            // Backward-compatible for 7-column sheet (A: ID, B: Date, C: Title, D: Type, E: Amount, F: Note, G: Wallet)
+            amount = row.length > 4 ? (double.tryParse(row[4]?.toString() ?? '0') ?? 0.0) : 0.0;
+            note = row.length > 5 ? row[5]?.toString() ?? '' : '';
+            rawWallet = row.length > 6 ? (row[6]?.toString() ?? tabName) : tabName;
+            final resolved = parseType(null, typeLabel);
+            if (TransactionModel.isDebitType(resolved)) {
+              debit = amount;
+            } else {
+              credit = amount;
+            }
+          }
+
           final walletName = stripTabPrefix(rawWallet);
 
           final record = {
@@ -535,6 +625,9 @@ class SyncService {
             'date': date,
             'titleCategory': titleCat,
             'transectionType': typeLabel,
+            'debit': debit,
+            'credit': credit,
+            'total': total,
             'amount': amount,
             'note': note,
             'walletName': walletName,
@@ -611,7 +704,7 @@ class SyncService {
 
       if (addRes.statusCode == 200) {
         // Write header row
-        final range = Uri.encodeComponent("'$tabName'!A1:G1");
+        final range = Uri.encodeComponent("'$tabName'!A1:I1");
         final headerUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId/values/$range?valueInputOption=USER_ENTERED");
         await http.put(
           headerUri,
@@ -843,7 +936,7 @@ class SyncService {
       }
 
       // Clear all rows from row 2 downwards in remaining default tabs
-      final List<String> rangesToClear = keepTabs.map((t) => "'$t'!A2:G").toList();
+      final List<String> rangesToClear = keepTabs.map((t) => "'$t'!A2:I").toList();
       final clearUri = Uri.parse("$_sheetsBaseUrl/$spreadsheetId/values:batchClear");
       await http.post(
         clearUri,

@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 10,
+      version: 11,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -153,6 +153,104 @@ class DatabaseHelper {
         WHERE type = 'cashWithdrawal' AND (toWalletId IS NULL OR toWalletId = 0)
       ''');
     }
+    if (oldVersion < 11) {
+      try {
+        await db.execute('ALTER TABLE transactions ADD COLUMN debit REAL DEFAULT 0.0');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE transactions ADD COLUMN credit REAL DEFAULT 0.0');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE transactions ADD COLUMN total REAL DEFAULT 0.0');
+      } catch (_) {}
+
+      final debitTypes = [
+        'expense',
+        'transfer',
+        'cashWithdrawal',
+        'loanGiven',
+        'loanGivenMore',
+        'loanRepaid',
+        'investmentCreated',
+        'investmentIncreased',
+        'investmentExpense',
+        'investmentAdjustment',
+        'savingsCreated',
+        'savingsIncreased',
+      ];
+      final debitInClause = debitTypes.map((t) => "'$t'").join(', ');
+
+      try {
+        await db.execute('''
+          UPDATE transactions
+          SET debit = CASE WHEN type IN ($debitInClause) THEN amount ELSE 0.0 END,
+              credit = CASE WHEN type NOT IN ($debitInClause) THEN amount ELSE 0.0 END
+          WHERE debit = 0.0 AND credit = 0.0
+        ''');
+      } catch (_) {}
+
+      try {
+        final wallets = await db.query('wallets');
+        for (var w in wallets) {
+          final int wId = w['id'] as int;
+          final txs = await db.query(
+            'transactions',
+            where: 'walletId = ? OR toWalletId = ?',
+            whereArgs: [wId, wId],
+            orderBy: 'date ASC, id ASC',
+          );
+
+          double running = 0.0;
+          for (var tx in txs) {
+            final int tId = tx['id'] as int;
+            final int txWalletId = tx['walletId'] as int;
+            final double d = (tx['debit'] as num?)?.toDouble() ?? 0.0;
+            final double c = (tx['credit'] as num?)?.toDouble() ?? 0.0;
+
+            if (txWalletId == wId) {
+              running = running + c - d;
+              await db.update('transactions', {'total': running}, where: 'id = ?', whereArgs: [tId]);
+            }
+          }
+        }
+      } catch (_) {}
+
+      try {
+        await db.execute('''
+          CREATE TABLE transactions_migrated (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sync_id TEXT UNIQUE,
+            title TEXT NOT NULL,
+            debit REAL DEFAULT 0.0,
+            credit REAL DEFAULT 0.0,
+            total REAL DEFAULT 0.0,
+            date TEXT NOT NULL,
+            note TEXT,
+            type TEXT NOT NULL,
+            walletId INTEGER NOT NULL,
+            toWalletId INTEGER,
+            categoryId INTEGER,
+            sync_status TEXT DEFAULT 'synced',
+            updated_at TEXT,
+            FOREIGN KEY (walletId) REFERENCES wallets (id),
+            FOREIGN KEY (toWalletId) REFERENCES wallets (id),
+            FOREIGN KEY (categoryId) REFERENCES categories (id)
+          )
+        ''');
+
+        await db.execute('''
+          INSERT INTO transactions_migrated (
+            id, sync_id, title, debit, credit, total, date, note, type, walletId, toWalletId, categoryId, sync_status, updated_at
+          )
+          SELECT 
+            id, sync_id, title, debit, credit, total, date, note, type, walletId, toWalletId, categoryId, sync_status, updated_at
+          FROM transactions
+        ''');
+
+        await db.execute('DROP TABLE transactions');
+        await db.execute('ALTER TABLE transactions_migrated RENAME TO transactions');
+      } catch (_) {}
+    }
   }
 
   Future _createDB(Database db, int version) async {
@@ -186,7 +284,9 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sync_id TEXT UNIQUE,
         title TEXT NOT NULL,
-        amount REAL NOT NULL,
+        debit REAL DEFAULT 0.0,
+        credit REAL DEFAULT 0.0,
+        total REAL DEFAULT 0.0,
         date TEXT NOT NULL,
         note TEXT,
         type TEXT NOT NULL,

@@ -61,8 +61,35 @@ void main() {
       expect(SyncService.parseType(null, 'Diposit'), equals(TransactionType.income));
       expect(SyncService.parseType(null, 'Transferred'), equals(TransactionType.transfer));
       expect(SyncService.parseType(null, 'Withdraw'), equals(TransactionType.cashWithdrawal));
+      expect(SyncService.parseType(null, 'Withdraw from'), equals(TransactionType.cashWithdrawal));
+      expect(SyncService.parseType(null, 'Withdraw to (Cash)'), equals(TransactionType.cashWithdrawal));
       expect(SyncService.parseType(null, 'Cash Withdrawal'), equals(TransactionType.cashWithdrawal));
+      expect(SyncService.parseType(null, 'Transferred from'), equals(TransactionType.transfer));
+      expect(SyncService.parseType(null, 'Transferred to'), equals(TransactionType.transfer));
       expect(SyncService.parseType('cashWithdrawal', null), equals(TransactionType.cashWithdrawal));
+    });
+
+    test('TransactionModel debit and credit categorization', () {
+      // Credit types
+      expect(TransactionModel.isCreditType(TransactionType.income), isTrue); // Diposit
+      expect(TransactionModel.isCreditType(TransactionType.loanRecovered), isTrue);
+      expect(TransactionModel.isCreditType(TransactionType.loanTaken), isTrue);
+      expect(TransactionModel.isCreditType(TransactionType.loanTakenMore), isTrue);
+      expect(TransactionModel.isCreditType(TransactionType.investmentProfit), isTrue);
+      expect(TransactionModel.isCreditType(TransactionType.investmentWithdraw), isTrue);
+      expect(TransactionModel.isCreditType(TransactionType.savingsWithdrawal), isTrue);
+
+      // Debit types
+      expect(TransactionModel.isDebitType(TransactionType.expense), isTrue);
+      expect(TransactionModel.isDebitType(TransactionType.loanGiven), isTrue);
+      expect(TransactionModel.isDebitType(TransactionType.loanGivenMore), isTrue);
+      expect(TransactionModel.isDebitType(TransactionType.loanRepaid), isTrue);
+      expect(TransactionModel.isDebitType(TransactionType.investmentCreated), isTrue);
+      expect(TransactionModel.isDebitType(TransactionType.investmentIncreased), isTrue);
+      expect(TransactionModel.isDebitType(TransactionType.investmentExpense), isTrue);
+      expect(TransactionModel.isDebitType(TransactionType.investmentAdjustment), isTrue);
+      expect(TransactionModel.isDebitType(TransactionType.savingsCreated), isTrue);
+      expect(TransactionModel.isDebitType(TransactionType.savingsIncreased), isTrue);
     });
 
     test('parseDate handles various formats', () {
